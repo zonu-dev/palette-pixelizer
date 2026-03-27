@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none">
+  <rect width="1200" height="630" fill="#F5F5F3" />
+  <rect x="64" y="64" width="1072" height="502" fill="#FFFFFF" stroke="#E6E7EB" />
+  <rect x="112" y="120" width="356" height="390" fill="#FBFBFA" stroke="#E6E7EB" />
+  <rect x="160" y="180" width="160" height="160" fill="#FFFFFF" stroke="#D4D7DD" />
+  <g stroke="#D4D7DD">
+    <path d="M200 180v160M240 180v160M280 180v160" />
+    <path d="M160 220h160M160 260h160M160 300h160" />
+  </g>
+  <rect x="160" y="180" width="40" height="40" fill="#0F380F" />
+  <rect x="200" y="220" width="40" height="40" fill="#306230" />
+  <rect x="240" y="260" width="40" height="40" fill="#8BAC0F" />
+  <rect x="280" y="300" width="40" height="40" fill="#9BBC0F" />
+  <rect x="160" y="382" width="220" height="18" fill="#E6E7EB" />
+  <rect x="160" y="414" width="156" height="18" fill="#E6E7EB" />
+  <rect x="160" y="446" width="188" height="18" fill="#E6E7EB" />
+  <g font-family="'Hiragino Sans', 'M PLUS 1', sans-serif" fill="#202124">
+    <text x="532" y="228" font-size="64" font-weight="800">ドット絵変換</text>
+    <text x="532" y="298" font-size="30" font-weight="600">
+      画像をサイズとパレット指定でドット絵化
+    </text>
+    <text x="532" y="346" font-size="30" font-weight="600">
+      ブラウザ内で変換してPNG保存
+    </text>
+    <text x="532" y="444" font-size="22" font-weight="500" fill="#667085">
+      https://zonu-dev.github.io/palette-pixelizer/
+    </text>
+  </g>
+  <rect x="532" y="394" width="188" height="50" fill="#EEF2F6" stroke="#D4D7DD" />
+  <g font-family="'Hiragino Sans', 'M PLUS 1', sans-serif" fill="#334155">
+    <text x="567" y="427" font-size="22" font-weight="700">PNG保存</text>
+  </g>
+</svg>
