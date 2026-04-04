@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import './App.css'
 import {
   BUILTIN_PALETTES,
@@ -60,6 +60,7 @@ const EXPORT_FORMAT_OPTIONS: Array<{
 
 function App() {
   const inputId = useId()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const adjustmentPreviewCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const [sourceImage, setSourceImage] = useState<SourceImage | null>(null)
@@ -84,9 +85,6 @@ function App() {
   const hasAdjustments = Object.values(adjustments).some((value) => value !== 0)
   const selectedResizeMode =
     RESIZE_MODE_OPTIONS.find((option) => option.value === resizeMode) ?? RESIZE_MODE_OPTIONS[0]
-  const paletteStripStyle = {
-    '--palette-count': selectedPalette.colors.length,
-  } as CSSProperties
   const effectiveBackground = backgroundColor || (exportFormat !== 'png' ? '#FFFFFF' : '')
   const selectedFormat =
     EXPORT_FORMAT_OPTIONS.find((option) => option.value === exportFormat) ?? EXPORT_FORMAT_OPTIONS[0]
@@ -341,6 +339,16 @@ function App() {
     setSelectedPaletteKey(DEFAULT_PALETTE_KEY)
   }
 
+  function clearSourceImage(): void {
+    setSourceImage((current) => {
+      if (current) {
+        URL.revokeObjectURL(current.objectUrl)
+      }
+
+      return null
+    })
+  }
+
   async function handleDownload(): Promise<void> {
     const canvas = previewCanvasRef.current
 
@@ -374,411 +382,456 @@ function App() {
 
   return (
     <main className="app">
-      <header className="app-header">
-        <div>
-          <h1>ドット絵変換</h1>
-          <p className="lead">補正、サイズ、パレットを指定して、PNG/JPEG/WebPで保存できます。</p>
+      <header className="app-header solid-shadow">
+        <div className="page-toolbar">
+          <a
+            className="zoochi-link"
+            href="https://zoochigames.com/index.html"
+            aria-label="ZOOCHIのトップページへ"
+          >
+            <img src="/zoochi-logo.png" alt="ZOOCHI" />
+          </a>
+
+          <a className="page-toolbar__link toy-btn" href="https://zoochigames.com/index.html">
+            トップページへ
+          </a>
         </div>
+
+        <section className="hero-card">
+          <div className="hero-card__badge-wrap wobble-container" aria-hidden="true">
+            <span className="hero-card__badge wobble-target">
+              <img src="/app-icon.png" alt="" className="hero-card__badge-icon" />
+            </span>
+          </div>
+
+          <div className="hero-card__copy">
+            <div className="meta-pills">
+              <span className="meta-pill meta-pill--brand">PALETTE PIXELIZER</span>
+              <span className="meta-pill">補正もできる</span>
+              <span className="meta-pill">PNG / JPEG / WebP</span>
+            </div>
+
+            <h1>画像をドット絵にする</h1>
+            <p className="lead hero-copy">
+              画像を読み込み、サイズ、補正、パレットを整えて、その場でドット絵化して保存できます。
+            </p>
+
+            <ul className="feature-tags" aria-label="主な特徴">
+              <li>補正プレビューつき</li>
+              <li>カスタムパレット対応</li>
+              <li>透過画像も保存できる</li>
+            </ul>
+          </div>
+        </section>
       </header>
 
       <div className="workspace">
         <aside className="settings-pane">
-          <div className="pane-panel-header">
-            <div className="title-with-icon">
-              <Icon name="sliders" />
+          <div className="tool-surface solid-shadow">
+            <div className="surface-heading">
+              <span className="surface-heading__marker" aria-hidden="true" />
               <h2>設定</h2>
             </div>
-          </div>
 
-          <section className="pane-section">
-            <div className="section-heading">
-              <Icon name="image" />
-              <h2>画像</h2>
-            </div>
-
-            <label
-              className={`dropzone ${isDragging ? 'dropzone-active' : ''}`}
-              htmlFor={inputId}
-              onDragEnter={(event) => {
-                event.preventDefault()
-                setIsDragging(true)
-              }}
-              onDragOver={(event) => {
-                event.preventDefault()
-                setIsDragging(true)
-              }}
-              onDragLeave={(event) => {
-                event.preventDefault()
-                if (event.currentTarget === event.target) {
-                  setIsDragging(false)
-                }
-              }}
-              onDrop={(event) => {
-                event.preventDefault()
-                setIsDragging(false)
-                void handleFileSelection(event.dataTransfer.files)
-              }}
-            >
-              <span className="dropzone-icon">
-                <Icon name="upload" />
-              </span>
-              <div className="dropzone-copy">
-                <strong>ドラッグ&ドロップ</strong>
-                <span>または画像を選択</span>
-              </div>
-              <span className="secondary-button">画像を選択</span>
-            </label>
-
-            <input
-              id={inputId}
-              type="file"
-              accept="image/*"
-              className="sr-only"
-              onChange={(event) => void handleFileSelection(event.target.files)}
-            />
-
-            {sourceImage ? (
-              <div className="source-meta">
-                <img src={sourceImage.objectUrl} alt="" className="source-thumb" />
-                <div className="source-copy">
-                  <strong>{sourceImage.fileName}</strong>
-                  <span>
-                    元画像 {sourceImage.width}×{sourceImage.height}
-                  </span>
+            <div className="surface-scroll custom-scrollbar">
+              <section className="section-card pane-section">
+                <div className="section-card__title">
+                  <Icon name="image" />
+                  <h2>画像</h2>
                 </div>
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={() => setSourceImage((current) => {
-                    if (current) {
-                      URL.revokeObjectURL(current.objectUrl)
+
+                <label
+                  className={`dropzone ${isDragging ? 'dropzone-active' : ''}`}
+                  htmlFor={inputId}
+                  onDragEnter={(event) => {
+                    event.preventDefault()
+                    setIsDragging(true)
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault()
+                    setIsDragging(true)
+                  }}
+                  onDragLeave={(event) => {
+                    event.preventDefault()
+                    if (event.currentTarget === event.target) {
+                      setIsDragging(false)
                     }
-
-                    return null
-                  })}
-                  aria-label="画像を外す"
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    setIsDragging(false)
+                    void handleFileSelection(event.dataTransfer.files)
+                  }}
                 >
-                  <Icon name="x" />
-                </button>
-              </div>
-            ) : null}
-          </section>
+                  <span className="dropzone-icon">
+                    <Icon name="upload" />
+                  </span>
+                  <div className="dropzone-copy">
+                    <strong>ドラッグ&ドロップ</strong>
+                    <span>または画像を選択</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      fileInputRef.current?.click()
+                    }}
+                  >
+                    画像を選択
+                  </button>
+                </label>
 
-          <section className="pane-section">
-            <div className="section-header-row">
-              <div className="section-heading">
-                <Icon name="sun" />
-                <h2>補正</h2>
-              </div>
-              <button
-                type="button"
-                className="text-button"
-                onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS })}
-                disabled={!hasAdjustments}
-              >
-                リセット
-              </button>
-            </div>
-
-            <SettingRow label="色相">
-              <AdjustmentControl
-                value={adjustments.hue}
-                min={-180}
-                max={180}
-                onChange={(value) => handleAdjustmentChange('hue', value)}
-              />
-            </SettingRow>
-
-            <SettingRow label="彩度">
-              <AdjustmentControl
-                value={adjustments.saturation}
-                min={-100}
-                max={100}
-                onChange={(value) => handleAdjustmentChange('saturation', value)}
-              />
-            </SettingRow>
-
-            <SettingRow label="明度">
-              <AdjustmentControl
-                value={adjustments.brightness}
-                min={-100}
-                max={100}
-                onChange={(value) => handleAdjustmentChange('brightness', value)}
-              />
-            </SettingRow>
-
-            <div className="adjustment-preview">
-              <div className="adjustment-preview-header">
-                <strong>補正プレビュー</strong>
-                <span>パレット変換前</span>
-              </div>
-              <div className="adjustment-preview-frame">
-                {sourceImage ? (
-                  <canvas ref={adjustmentPreviewCanvasRef} className="adjustment-preview-canvas" />
-                ) : (
-                  <span className="adjustment-preview-empty">画像追加後に表示</span>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <section className="pane-section">
-            <div className="section-heading">
-              <Icon name="sliders" />
-              <h2>サイズ</h2>
-            </div>
-
-            <SettingRow label="プリセット">
-              <select
-                value={sizePreset?.id ?? 'custom'}
-                onChange={(event) => handleSizePresetChange(event.target.value)}
-              >
-                {SIZE_PRESETS.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.label}
-                  </option>
-                ))}
-                <option value="custom">任意</option>
-              </select>
-            </SettingRow>
-
-            <SettingRow label="幅">
-              <input
-                type="number"
-                min={1}
-                max={256}
-                value={outputWidth}
-                onChange={(event) => handleDimensionChange('width', event.target.value)}
-              />
-            </SettingRow>
-
-            <SettingRow label="高さ">
-              <input
-                type="number"
-                min={1}
-                max={256}
-                value={outputHeight}
-                onChange={(event) => handleDimensionChange('height', event.target.value)}
-              />
-            </SettingRow>
-
-            <SettingRow label="リサイズ">
-              <select
-                value={resizeMode}
-                onChange={(event) => setResizeMode(event.target.value as ResizeMode)}
-              >
-                {RESIZE_MODE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </SettingRow>
-          </section>
-
-          <section className="pane-section">
-            <div className="section-heading">
-              <Icon name="palette" />
-              <h2>パレット</h2>
-            </div>
-
-            <SettingRow label="選択">
-              <div className="palette-picker-row">
-                <select
-                  value={selectedPaletteKey}
-                  onChange={(event) => setSelectedPaletteKey(event.target.value)}
-                >
-                  <optgroup label="プリセット">
-                    {BUILTIN_PALETTES.map((palette) => (
-                      <option key={palette.id} value={`builtin:${palette.id}`}>
-                        {palette.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="カスタム">
-                    {customPalettes.map((palette) => (
-                      <option key={palette.id} value={`custom:${palette.id}`}>
-                        {palette.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-                <button type="button" className="icon-button" onClick={handleCreateCustomPalette}>
-                  <Icon name="plus" />
-                  <span>新規</span>
-                </button>
-              </div>
-            </SettingRow>
-
-            <div className="palette-strip" aria-label="選択中の色" style={paletteStripStyle}>
-              {selectedPalette.colors.map((color) => (
-                <span
-                  key={`${selectedPalette.id}-${color}`}
-                  className="palette-chip"
-                  style={{ backgroundColor: color }}
-                  title={color}
+                <input
+                  id={inputId}
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(event) => void handleFileSelection(event.target.files)}
                 />
-              ))}
-            </div>
 
-            {selectedCustomPalette ? (
-              <div className="custom-palette-editor">
-                <SettingRow label="名前">
-                  <input
-                    type="text"
-                    value={selectedCustomPalette.name}
-                    onChange={(event) => handleCustomPaletteNameChange(event.target.value)}
+                {sourceImage ? (
+                  <div className="source-meta">
+                    <img src={sourceImage.objectUrl} alt="" className="source-thumb" />
+                    <div className="source-copy">
+                      <strong>{sourceImage.fileName}</strong>
+                      <span>
+                        元画像 {sourceImage.width}×{sourceImage.height}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-button icon-button-quiet"
+                      onClick={clearSourceImage}
+                      aria-label="画像を外す"
+                    >
+                      <Icon name="x" />
+                    </button>
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="section-card pane-section section-card--warm">
+                <div className="section-header-row">
+                  <div className="section-card__title">
+                    <Icon name="sun" />
+                    <h2>補正</h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS })}
+                    disabled={!hasAdjustments}
+                  >
+                    リセット
+                  </button>
+                </div>
+
+                <SettingRow label="色相">
+                  <AdjustmentControl
+                    value={adjustments.hue}
+                    min={-180}
+                    max={180}
+                    onChange={(value) => handleAdjustmentChange('hue', value)}
                   />
                 </SettingRow>
 
-                <div className="color-list">
-                  {selectedCustomPalette.colors.map((color, index) => (
-                    <div className="color-row" key={`${selectedCustomPalette.id}-${index}`}>
-                      <span className="color-index">{index + 1}</span>
-                      <input
-                        type="color"
-                        value={color}
-                        aria-label={`色${index + 1}`}
-                        onChange={(event) =>
-                          handleCustomColorChange(index, event.target.value.toUpperCase())
-                        }
+                <SettingRow label="彩度">
+                  <AdjustmentControl
+                    value={adjustments.saturation}
+                    min={-100}
+                    max={100}
+                    onChange={(value) => handleAdjustmentChange('saturation', value)}
+                  />
+                </SettingRow>
+
+                <SettingRow label="明度">
+                  <AdjustmentControl
+                    value={adjustments.brightness}
+                    min={-100}
+                    max={100}
+                    onChange={(value) => handleAdjustmentChange('brightness', value)}
+                  />
+                </SettingRow>
+
+                <div className="section-divider" aria-hidden="true" />
+
+                <div className="adjustment-preview">
+                  <div className="adjustment-preview-header">
+                    <strong>補正プレビュー</strong>
+                    <span>パレット変換前</span>
+                  </div>
+                  <div className="adjustment-preview-frame">
+                    {sourceImage ? (
+                      <canvas
+                        ref={adjustmentPreviewCanvasRef}
+                        className="adjustment-preview-canvas"
                       />
-                      <HexColorField
-                        key={`${selectedCustomPalette.id}-${index}-${color}`}
-                        value={color}
-                        ariaLabel={`色${index + 1}のHEX`}
-                        onCommit={(nextColor) => handleCustomColorChange(index, nextColor)}
-                      />
-                      <button
-                        type="button"
-                        className="icon-button icon-button-quiet"
-                        onClick={() => handleRemoveCustomColor(index)}
-                        disabled={selectedCustomPalette.colors.length <= 1}
-                        aria-label={`色${index + 1}を削除`}
-                      >
-                        <Icon name="trash" />
-                      </button>
-                    </div>
+                    ) : (
+                      <span className="adjustment-preview-empty">画像追加後に表示</span>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section className="section-card pane-section">
+                <div className="section-card__title">
+                  <Icon name="sliders" />
+                  <h2>サイズ</h2>
+                </div>
+
+                <SettingRow label="プリセット">
+                  <select
+                    value={sizePreset?.id ?? 'custom'}
+                    onChange={(event) => handleSizePresetChange(event.target.value)}
+                  >
+                    {SIZE_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                    <option value="custom">任意</option>
+                  </select>
+                </SettingRow>
+
+                <SettingRow label="幅">
+                  <input
+                    type="number"
+                    min={1}
+                    max={256}
+                    value={outputWidth}
+                    onChange={(event) => handleDimensionChange('width', event.target.value)}
+                  />
+                </SettingRow>
+
+                <SettingRow label="高さ">
+                  <input
+                    type="number"
+                    min={1}
+                    max={256}
+                    value={outputHeight}
+                    onChange={(event) => handleDimensionChange('height', event.target.value)}
+                  />
+                </SettingRow>
+
+                <SettingRow label="リサイズ">
+                  <select
+                    value={resizeMode}
+                    onChange={(event) => setResizeMode(event.target.value as ResizeMode)}
+                  >
+                    {RESIZE_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </SettingRow>
+              </section>
+
+              <section className="section-card pane-section">
+                <div className="section-card__title">
+                  <Icon name="palette" />
+                  <h2>パレット</h2>
+                </div>
+
+                <SettingRow label="選択">
+                  <div className="palette-picker-row">
+                    <select
+                      value={selectedPaletteKey}
+                      onChange={(event) => setSelectedPaletteKey(event.target.value)}
+                    >
+                      <optgroup label="プリセット">
+                        {BUILTIN_PALETTES.map((palette) => (
+                          <option key={palette.id} value={`builtin:${palette.id}`}>
+                            {palette.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="カスタム">
+                        {customPalettes.map((palette) => (
+                          <option key={palette.id} value={`custom:${palette.id}`}>
+                            {palette.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <button type="button" className="icon-button" onClick={handleCreateCustomPalette}>
+                      <Icon name="plus" />
+                      <span>新規</span>
+                    </button>
+                  </div>
+                </SettingRow>
+
+                <div className="palette-strip" aria-label="選択中の色">
+                  {selectedPalette.colors.map((color) => (
+                    <span
+                      key={`${selectedPalette.id}-${color}`}
+                      className="palette-chip"
+                      style={{ backgroundColor: color }}
+                      title={color}
+                    />
                   ))}
                 </div>
 
-                <div className="custom-actions">
-                  <button type="button" className="text-button" onClick={handleAddCustomColor}>
-                    <Icon name="plus" />
-                    <span>色を追加</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="text-button text-button-danger"
-                    onClick={handleDeleteCustomPalette}
-                  >
-                    <Icon name="trash" />
-                    <span>パレットを削除</span>
-                  </button>
+                {selectedCustomPalette ? (
+                  <div className="custom-palette-editor">
+                    <SettingRow label="名前">
+                      <input
+                        type="text"
+                        value={selectedCustomPalette.name}
+                        onChange={(event) => handleCustomPaletteNameChange(event.target.value)}
+                      />
+                    </SettingRow>
+
+                    <div className="color-list">
+                      {selectedCustomPalette.colors.map((color, index) => (
+                        <div className="color-row" key={`${selectedCustomPalette.id}-${index}`}>
+                          <span className="color-index">{index + 1}</span>
+                          <input
+                            type="color"
+                            value={color}
+                            aria-label={`色${index + 1}`}
+                            onChange={(event) =>
+                              handleCustomColorChange(index, event.target.value.toUpperCase())
+                            }
+                          />
+                          <HexColorField
+                            key={`${selectedCustomPalette.id}-${index}-${color}`}
+                            value={color}
+                            ariaLabel={`色${index + 1}のHEX`}
+                            onCommit={(nextColor) => handleCustomColorChange(index, nextColor)}
+                          />
+                          <button
+                            type="button"
+                            className="icon-button icon-button-quiet"
+                            onClick={() => handleRemoveCustomColor(index)}
+                            disabled={selectedCustomPalette.colors.length <= 1}
+                            aria-label={`色${index + 1}を削除`}
+                          >
+                            <Icon name="trash" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="custom-actions">
+                      <button type="button" className="text-button" onClick={handleAddCustomColor}>
+                        <Icon name="plus" />
+                        <span>色を追加</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="text-button text-button-danger"
+                        onClick={handleDeleteCustomPalette}
+                      >
+                        <Icon name="trash" />
+                        <span>パレットを削除</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="section-card pane-section">
+                <div className="section-card__title">
+                  <Icon name="save" />
+                  <h2>出力</h2>
                 </div>
-              </div>
-            ) : null}
-          </section>
 
-          <section className="pane-section">
-            <div className="section-heading">
-              <Icon name="save" />
-              <h2>出力</h2>
+                <SettingRow label="背景色">
+                  <div className="bg-color-control">
+                    <button
+                      type="button"
+                      className={`bg-chip ${!backgroundColor ? 'bg-chip-active' : ''}`}
+                      onClick={() => setBackgroundColor('')}
+                    >
+                      透過
+                    </button>
+                    <input
+                      type="color"
+                      value={backgroundColor || '#FFFFFF'}
+                      onChange={(event) => setBackgroundColor(event.target.value.toUpperCase())}
+                    />
+                    <HexColorField
+                      key={`bg-${backgroundColor}`}
+                      value={backgroundColor || ''}
+                      ariaLabel="背景色のHEX"
+                      placeholder="#FFFFFF"
+                      onCommit={(nextColor) => setBackgroundColor(nextColor)}
+                    />
+                  </div>
+                </SettingRow>
+
+                <SettingRow label="保存形式">
+                  <select
+                    value={exportFormat}
+                    onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
+                  >
+                    {EXPORT_FORMAT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </SettingRow>
+
+                {exportFormat !== 'png' && !backgroundColor ? (
+                  <p className="setting-note">透過部分は白で出力されます</p>
+                ) : null}
+              </section>
             </div>
-
-            <SettingRow label="背景色">
-              <div className="bg-color-control">
-                <button
-                  type="button"
-                  className={`bg-chip ${!backgroundColor ? 'bg-chip-active' : ''}`}
-                  onClick={() => setBackgroundColor('')}
-                >
-                  透過
-                </button>
-                <input
-                  type="color"
-                  value={backgroundColor || '#FFFFFF'}
-                  onChange={(event) => setBackgroundColor(event.target.value.toUpperCase())}
-                />
-                <HexColorField
-                  key={`bg-${backgroundColor}`}
-                  value={backgroundColor || ''}
-                  ariaLabel="背景色のHEX"
-                  placeholder="#FFFFFF"
-                  onCommit={(nextColor) => setBackgroundColor(nextColor)}
-                />
-              </div>
-            </SettingRow>
-
-            <SettingRow label="フォーマット">
-              <select
-                value={exportFormat}
-                onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
-              >
-                {EXPORT_FORMAT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </SettingRow>
-
-            {exportFormat !== 'png' && !backgroundColor ? (
-              <p className="setting-note">透過部分は白で出力されます</p>
-            ) : null}
-          </section>
+          </div>
         </aside>
 
         <section className="preview-pane">
-          <div className="preview-header">
-            <div className="section-heading">
-              <Icon name="monitor" />
-              <h2>プレビュー</h2>
-            </div>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() => void handleDownload()}
-              disabled={!sourceImage}
-            >
-              <Icon name="download" />
-              <span>{selectedFormat.label}保存</span>
-            </button>
-          </div>
-
-          <div className="preview-meta">
-            <span>{outputWidth}×{outputHeight}</span>
-            <span>{selectedResizeMode.label}</span>
-            <span>{selectedPalette.name}</span>
-            <span>{selectedPalette.colors.length}色</span>
-            {hasAdjustments ? <span>補正あり</span> : null}
-            <span>{selectedFormat.label}</span>
-            {effectiveBackground ? <span>{effectiveBackground}</span> : <span>透過</span>}
-          </div>
-
-          <div className="preview-stage">
-            {sourceImage ? (
-              <canvas
-                ref={previewCanvasRef}
-                className="preview-canvas"
-                style={{
-                  width: `${outputWidth * previewScale}px`,
-                  height: `${outputHeight * previewScale}px`,
-                }}
-              />
-            ) : (
-              <div className="preview-empty">
-                <span className="preview-empty-icon">
-                  <Icon name="image" />
-                </span>
-                <strong>画像を追加するとここに表示されます</strong>
+          <div className="tool-surface preview-surface solid-shadow">
+            <div className="preview-header">
+              <div className="surface-heading">
+                <span className="surface-heading__marker" aria-hidden="true" />
+                <h2>プレビュー</h2>
               </div>
-            )}
-          </div>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void handleDownload()}
+                disabled={!sourceImage}
+              >
+                <span className="button-label">保存する</span>
+                <span className="button-icon">
+                  <Icon name="arrow-right" />
+                </span>
+              </button>
+            </div>
 
-          <div className="preview-notes">
-            <p>設定変更はすぐに反映されます。</p>
-            <p>保存画像も表示中のサイズとパレットで出力されます。</p>
+            <div className="preview-meta">
+              <span>{outputWidth}×{outputHeight}</span>
+              <span>{selectedResizeMode.label}</span>
+              <span>{selectedPalette.name}</span>
+              <span>{selectedPalette.colors.length}色</span>
+              <span>{selectedFormat.label}</span>
+              {effectiveBackground ? <span>{effectiveBackground}</span> : <span>透過</span>}
+            </div>
+
+            <div className="preview-stage">
+              {sourceImage ? (
+                <canvas
+                  ref={previewCanvasRef}
+                  className="preview-canvas"
+                  style={{
+                    width: `${outputWidth * previewScale}px`,
+                    height: `${outputHeight * previewScale}px`,
+                  }}
+                />
+              ) : (
+                <div className="preview-empty">
+                  <span className="preview-empty-icon">
+                    <Icon name="image" />
+                  </span>
+                  <strong>画像を追加するとここに表示されます</strong>
+                </div>
+              )}
+            </div>
           </div>
         </section>
       </div>
@@ -860,6 +913,7 @@ function HexColorField(props: {
 
 function Icon(props: { name: string }) {
   const icons: Record<string, React.ReactNode> = {
+    'arrow-right': <path d="M5 12h14M13 5l7 7-7 7" />,
     download: (
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
     ),
@@ -868,6 +922,12 @@ function Icon(props: { name: string }) {
         <rect x="3" y="5" width="18" height="14" rx="2" />
         <circle cx="8.5" cy="10.5" r="1.5" />
         <path d="m21 15-5-5L5 21" />
+      </>
+    ),
+    home: (
+      <>
+        <path d="m3 10 9-7 9 7" />
+        <path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5" />
       </>
     ),
     monitor: (
