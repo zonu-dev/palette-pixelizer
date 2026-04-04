@@ -287,7 +287,7 @@
   gap: 20px;
   padding: 16px;
   border-radius: 1.9rem;
-  background: var(--surface-soft);
+  background: #ffffff;
 }
 
 .app-card__wobble {
