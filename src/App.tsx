@@ -1,5 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import './App.css'
+import LanguageSwitcher from './components/LanguageSwitcher'
+import {
+  getPaletteName,
+  getResizeModeLabels,
+  getTopPageHref,
+  readLocaleFromLocation,
+  resolveInitialLocale,
+  STRINGS,
+  syncLocaleState,
+  type Locale,
+} from './i18n'
 import {
   BUILTIN_PALETTES,
   DEFAULT_CUSTOM_COLORS,
@@ -39,11 +50,6 @@ const DEFAULT_ADJUSTMENTS: AdjustmentSettings = {
   saturation: 0,
   brightness: 0,
 }
-const RESIZE_MODE_OPTIONS: Array<{ value: ResizeMode; label: string }> = [
-  { value: 'center-crop', label: '中心トリミング' },
-  { value: 'contain', label: '全体表示' },
-  { value: 'stretch', label: '引き伸ばし' },
-]
 
 type ExportFormat = 'png' | 'jpeg' | 'webp'
 
@@ -63,6 +69,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const adjustmentPreviewCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [locale, setLocale] = useState<Locale>(() => resolveInitialLocale())
   const [sourceImage, setSourceImage] = useState<SourceImage | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [outputWidth, setOutputWidth] = useState(DEFAULT_SIZE.width)
@@ -70,10 +77,21 @@ function App() {
   const [selectedPaletteKey, setSelectedPaletteKey] = useState(DEFAULT_PALETTE_KEY)
   const [adjustments, setAdjustments] = useState<AdjustmentSettings>({ ...DEFAULT_ADJUSTMENTS })
   const [resizeMode, setResizeMode] = useState<ResizeMode>('center-crop')
-  const [customPalettes, setCustomPalettes] = useState<CustomPalette[]>(() => loadCustomPalettes())
+  const [customPalettes, setCustomPalettes] = useState<CustomPalette[]>(() =>
+    loadCustomPalettes(resolveInitialLocale()),
+  )
   const [backgroundColor, setBackgroundColor] = useState('')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('png')
+  const [isLocalPreview] = useState(() => isLocalPreviewHost())
+  const [isMobilePreview, setIsMobilePreview] = useState(() => hasMobilePreviewQuery())
 
+  const t = STRINGS[locale]
+  const resizeModeLabels = getResizeModeLabels(locale)
+  const resizeModeOptions: Array<{ value: ResizeMode; label: string }> = [
+    { value: 'center-crop', label: resizeModeLabels['center-crop'] },
+    { value: 'contain', label: resizeModeLabels.contain },
+    { value: 'stretch', label: resizeModeLabels.stretch },
+  ]
   const sizePreset = SIZE_PRESETS.find(
     (preset) => preset.width === outputWidth && preset.height === outputHeight,
   )
@@ -84,14 +102,51 @@ function App() {
   const previewScale = Math.max(1, Math.floor(Math.min(520 / outputWidth, 520 / outputHeight)))
   const hasAdjustments = Object.values(adjustments).some((value) => value !== 0)
   const selectedResizeMode =
-    RESIZE_MODE_OPTIONS.find((option) => option.value === resizeMode) ?? RESIZE_MODE_OPTIONS[0]
+    resizeModeOptions.find((option) => option.value === resizeMode) ?? resizeModeOptions[0]
   const effectiveBackground = backgroundColor || (exportFormat !== 'png' ? '#FFFFFF' : '')
   const selectedFormat =
     EXPORT_FORMAT_OPTIONS.find((option) => option.value === exportFormat) ?? EXPORT_FORMAT_OPTIONS[0]
+  const selectedPaletteLabel = getPaletteName(
+    locale,
+    selectedPalette.id,
+    selectedPalette.name,
+    selectedPalette.isCustom,
+  )
+  const topPageHref = getTopPageHref(locale, isMobilePreview)
 
   useEffect(() => {
     window.localStorage.setItem(CUSTOM_STORAGE_KEY, JSON.stringify(customPalettes))
   }, [customPalettes])
+
+  useEffect(() => {
+    document.body.classList.toggle('mobile-preview', isMobilePreview)
+    document.body.classList.toggle('is-local-preview', isLocalPreview)
+
+    return () => {
+      document.body.classList.remove('mobile-preview')
+      document.body.classList.remove('is-local-preview')
+    }
+  }, [isLocalPreview, isMobilePreview])
+
+  useEffect(() => {
+    syncLocaleState(locale, isMobilePreview, t.pageTitle)
+  }, [isMobilePreview, locale, t.pageTitle])
+
+  useEffect(() => {
+    function handlePopState() {
+      setIsMobilePreview(hasMobilePreviewQuery())
+      const nextLocale = readLocaleFromLocation()
+
+      if (nextLocale) {
+        setLocale(nextLocale)
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+    }
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -242,7 +297,7 @@ function App() {
     const nextIndex = customPalettes.length + 1
     const nextPalette: CustomPalette = {
       id: `custom-${Date.now()}`,
-      name: `カスタム${nextIndex}`,
+      name: t.customPaletteName(nextIndex),
       colors: [...selectedPalette.colors],
       isCustom: true,
     }
@@ -265,7 +320,7 @@ function App() {
         palette.id === selectedCustomPalette.id
           ? {
               ...palette,
-              name: nextName || 'カスタム',
+              name: nextName || t.customPaletteFallback,
             }
           : palette,
       ),
@@ -381,46 +436,34 @@ function App() {
   }
 
   return (
-    <main className="app">
-      <header className="app-header solid-shadow">
-        <div className="page-toolbar">
-          <a
-            className="zoochi-link"
-            href="https://zoochigames.com/index.html"
-            aria-label="ZOOCHIのトップページへ"
-          >
-            <img src="/zoochi-logo.png" alt="ZOOCHI" />
-          </a>
+    <main className={`app ${isMobilePreview ? 'is-mobile-preview' : ''}`}>
+      <header className="page-header">
+        <div className="document-toolbar">
+          <div className="document-toolbar__controls">
+            <a
+              className="document-home-link"
+              href={topPageHref}
+              aria-label={t.topPageAria}
+            >
+              <img src="/zoochi-logo.png" alt="ZOOCHI" className="brand-logo" />
+            </a>
 
-          <a className="page-toolbar__link toy-btn" href="https://zoochigames.com/index.html">
-            トップページへ
-          </a>
+            <LanguageSwitcher ariaLabel={t.languageLabel} locale={locale} onChange={setLocale} />
+          </div>
         </div>
 
-        <section className="hero-card">
-          <div className="hero-card__badge-wrap wobble-container" aria-hidden="true">
-            <span className="hero-card__badge wobble-target">
-              <img src="/app-icon.png" alt="" className="hero-card__badge-icon" />
-            </span>
-          </div>
-
-          <div className="hero-card__copy">
-            <div className="meta-pills">
-              <span className="meta-pill meta-pill--brand">PALETTE PIXELIZER</span>
-              <span className="meta-pill">補正もできる</span>
-              <span className="meta-pill">PNG / JPEG / WebP</span>
+        <section className="header-card solid-shadow">
+          <div className="header-card__hero">
+            <div className="wobble-container app-card__wobble app-card__wobble--negative" aria-hidden="true">
+              <div className="wobble-target app-badge app-badge--palette">
+                <img src="/app-icon.png" alt="" className="app-badge__icon" />
+              </div>
             </div>
 
-            <h1>画像をドット絵にする</h1>
-            <p className="lead hero-copy">
-              画像を読み込み、サイズ、補正、パレットを整えて、その場でドット絵化して保存できます。
-            </p>
-
-            <ul className="feature-tags" aria-label="主な特徴">
-              <li>補正プレビューつき</li>
-              <li>カスタムパレット対応</li>
-              <li>透過画像も保存できる</li>
-            </ul>
+            <div className="header-card__copy">
+              <h1>Palette Pixelizer</h1>
+              <p>{t.headerSummary}</p>
+            </div>
           </div>
         </section>
       </header>
@@ -430,14 +473,14 @@ function App() {
           <div className="tool-surface solid-shadow">
             <div className="surface-heading">
               <span className="surface-heading__marker" aria-hidden="true" />
-              <h2>設定</h2>
+              <h2>{t.settingsHeading}</h2>
             </div>
 
             <div className="surface-scroll custom-scrollbar">
               <section className="section-card pane-section">
                 <div className="section-card__title">
                   <Icon name="image" />
-                  <h2>画像</h2>
+                  <h2>{t.imageSectionTitle}</h2>
                 </div>
 
                 <label
@@ -467,8 +510,8 @@ function App() {
                     <Icon name="upload" />
                   </span>
                   <div className="dropzone-copy">
-                    <strong>ドラッグ&ドロップ</strong>
-                    <span>または画像を選択</span>
+                    <strong>{t.dropzoneTitle}</strong>
+                    <span>{t.dropzoneSubtitle}</span>
                   </div>
                   <button
                     type="button"
@@ -478,7 +521,7 @@ function App() {
                       fileInputRef.current?.click()
                     }}
                   >
-                    画像を選択
+                    {t.chooseImageLabel}
                   </button>
                 </label>
 
@@ -496,15 +539,13 @@ function App() {
                     <img src={sourceImage.objectUrl} alt="" className="source-thumb" />
                     <div className="source-copy">
                       <strong>{sourceImage.fileName}</strong>
-                      <span>
-                        元画像 {sourceImage.width}×{sourceImage.height}
-                      </span>
+                      <span>{t.originalImageLabel(sourceImage.width, sourceImage.height)}</span>
                     </div>
                     <button
                       type="button"
                       className="icon-button icon-button-quiet"
                       onClick={clearSourceImage}
-                      aria-label="画像を外す"
+                      aria-label={t.removeImageAria}
                     >
                       <Icon name="x" />
                     </button>
@@ -516,7 +557,7 @@ function App() {
                 <div className="section-header-row">
                   <div className="section-card__title">
                     <Icon name="sun" />
-                    <h2>補正</h2>
+                    <h2>{t.adjustmentsTitle}</h2>
                   </div>
                   <button
                     type="button"
@@ -524,11 +565,11 @@ function App() {
                     onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS })}
                     disabled={!hasAdjustments}
                   >
-                    リセット
+                    {t.resetLabel}
                   </button>
                 </div>
 
-                <SettingRow label="色相">
+                <SettingRow label={t.hueLabel}>
                   <AdjustmentControl
                     value={adjustments.hue}
                     min={-180}
@@ -537,7 +578,7 @@ function App() {
                   />
                 </SettingRow>
 
-                <SettingRow label="彩度">
+                <SettingRow label={t.saturationLabel}>
                   <AdjustmentControl
                     value={adjustments.saturation}
                     min={-100}
@@ -546,7 +587,7 @@ function App() {
                   />
                 </SettingRow>
 
-                <SettingRow label="明度">
+                <SettingRow label={t.brightnessLabel}>
                   <AdjustmentControl
                     value={adjustments.brightness}
                     min={-100}
@@ -559,8 +600,8 @@ function App() {
 
                 <div className="adjustment-preview">
                   <div className="adjustment-preview-header">
-                    <strong>補正プレビュー</strong>
-                    <span>パレット変換前</span>
+                    <strong>{t.adjustmentPreviewTitle}</strong>
+                    <span>{t.beforePaletteLabel}</span>
                   </div>
                   <div className="adjustment-preview-frame">
                     {sourceImage ? (
@@ -569,7 +610,7 @@ function App() {
                         className="adjustment-preview-canvas"
                       />
                     ) : (
-                      <span className="adjustment-preview-empty">画像追加後に表示</span>
+                      <span className="adjustment-preview-empty">{t.adjustmentPreviewEmpty}</span>
                     )}
                   </div>
                 </div>
@@ -578,10 +619,10 @@ function App() {
               <section className="section-card pane-section">
                 <div className="section-card__title">
                   <Icon name="sliders" />
-                  <h2>サイズ</h2>
+                  <h2>{t.sizeTitle}</h2>
                 </div>
 
-                <SettingRow label="プリセット">
+                <SettingRow label={t.presetLabel}>
                   <select
                     value={sizePreset?.id ?? 'custom'}
                     onChange={(event) => handleSizePresetChange(event.target.value)}
@@ -591,11 +632,11 @@ function App() {
                         {preset.label}
                       </option>
                     ))}
-                    <option value="custom">任意</option>
+                    <option value="custom">{t.customSizeLabel}</option>
                   </select>
                 </SettingRow>
 
-                <SettingRow label="幅">
+                <SettingRow label={t.widthLabel}>
                   <input
                     type="number"
                     min={1}
@@ -605,7 +646,7 @@ function App() {
                   />
                 </SettingRow>
 
-                <SettingRow label="高さ">
+                <SettingRow label={t.heightLabel}>
                   <input
                     type="number"
                     min={1}
@@ -615,12 +656,12 @@ function App() {
                   />
                 </SettingRow>
 
-                <SettingRow label="リサイズ">
+                <SettingRow label={t.resizeLabel}>
                   <select
                     value={resizeMode}
                     onChange={(event) => setResizeMode(event.target.value as ResizeMode)}
                   >
-                    {RESIZE_MODE_OPTIONS.map((option) => (
+                    {resizeModeOptions.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
@@ -632,23 +673,23 @@ function App() {
               <section className="section-card pane-section">
                 <div className="section-card__title">
                   <Icon name="palette" />
-                  <h2>パレット</h2>
+                  <h2>{t.paletteTitle}</h2>
                 </div>
 
-                <SettingRow label="選択">
+                <SettingRow label={t.selectionLabel}>
                   <div className="palette-picker-row">
                     <select
                       value={selectedPaletteKey}
                       onChange={(event) => setSelectedPaletteKey(event.target.value)}
                     >
-                      <optgroup label="プリセット">
+                      <optgroup label={t.presetGroupLabel}>
                         {BUILTIN_PALETTES.map((palette) => (
                           <option key={palette.id} value={`builtin:${palette.id}`}>
-                            {palette.name}
+                            {getPaletteName(locale, palette.id, palette.name, false)}
                           </option>
                         ))}
                       </optgroup>
-                      <optgroup label="カスタム">
+                      <optgroup label={t.customGroupLabel}>
                         {customPalettes.map((palette) => (
                           <option key={palette.id} value={`custom:${palette.id}`}>
                             {palette.name}
@@ -658,12 +699,12 @@ function App() {
                     </select>
                     <button type="button" className="icon-button" onClick={handleCreateCustomPalette}>
                       <Icon name="plus" />
-                      <span>新規</span>
+                      <span>{t.newPaletteLabel}</span>
                     </button>
                   </div>
                 </SettingRow>
 
-                <div className="palette-strip" aria-label="選択中の色">
+                <div className="palette-strip" aria-label={t.selectedColorsAria}>
                   {selectedPalette.colors.map((color) => (
                     <span
                       key={`${selectedPalette.id}-${color}`}
@@ -676,7 +717,7 @@ function App() {
 
                 {selectedCustomPalette ? (
                   <div className="custom-palette-editor">
-                    <SettingRow label="名前">
+                    <SettingRow label={t.paletteNameLabel}>
                       <input
                         type="text"
                         value={selectedCustomPalette.name}
@@ -691,7 +732,7 @@ function App() {
                           <input
                             type="color"
                             value={color}
-                            aria-label={`色${index + 1}`}
+                            aria-label={t.colorInputAria(index + 1)}
                             onChange={(event) =>
                               handleCustomColorChange(index, event.target.value.toUpperCase())
                             }
@@ -699,7 +740,7 @@ function App() {
                           <HexColorField
                             key={`${selectedCustomPalette.id}-${index}-${color}`}
                             value={color}
-                            ariaLabel={`色${index + 1}のHEX`}
+                            ariaLabel={t.colorHexAria(index + 1)}
                             onCommit={(nextColor) => handleCustomColorChange(index, nextColor)}
                           />
                           <button
@@ -707,7 +748,7 @@ function App() {
                             className="icon-button icon-button-quiet"
                             onClick={() => handleRemoveCustomColor(index)}
                             disabled={selectedCustomPalette.colors.length <= 1}
-                            aria-label={`色${index + 1}を削除`}
+                            aria-label={t.deleteColorAria(index + 1)}
                           >
                             <Icon name="trash" />
                           </button>
@@ -718,7 +759,7 @@ function App() {
                     <div className="custom-actions">
                       <button type="button" className="text-button" onClick={handleAddCustomColor}>
                         <Icon name="plus" />
-                        <span>色を追加</span>
+                        <span>{t.addColorLabel}</span>
                       </button>
                       <button
                         type="button"
@@ -726,7 +767,7 @@ function App() {
                         onClick={handleDeleteCustomPalette}
                       >
                         <Icon name="trash" />
-                        <span>パレットを削除</span>
+                        <span>{t.deletePaletteLabel}</span>
                       </button>
                     </div>
                   </div>
@@ -736,17 +777,17 @@ function App() {
               <section className="section-card pane-section">
                 <div className="section-card__title">
                   <Icon name="save" />
-                  <h2>出力</h2>
+                  <h2>{t.outputTitle}</h2>
                 </div>
 
-                <SettingRow label="背景色">
+                <SettingRow label={t.backgroundColorLabel}>
                   <div className="bg-color-control">
                     <button
                       type="button"
                       className={`bg-chip ${!backgroundColor ? 'bg-chip-active' : ''}`}
                       onClick={() => setBackgroundColor('')}
                     >
-                      透過
+                      {t.transparentLabel}
                     </button>
                     <input
                       type="color"
@@ -756,14 +797,14 @@ function App() {
                     <HexColorField
                       key={`bg-${backgroundColor}`}
                       value={backgroundColor || ''}
-                      ariaLabel="背景色のHEX"
+                      ariaLabel={t.backgroundHexAria}
                       placeholder="#FFFFFF"
                       onCommit={(nextColor) => setBackgroundColor(nextColor)}
                     />
                   </div>
                 </SettingRow>
 
-                <SettingRow label="保存形式">
+                <SettingRow label={t.exportFormatLabel}>
                   <select
                     value={exportFormat}
                     onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
@@ -777,7 +818,7 @@ function App() {
                 </SettingRow>
 
                 {exportFormat !== 'png' && !backgroundColor ? (
-                  <p className="setting-note">透過部分は白で出力されます</p>
+                  <p className="setting-note">{t.nonPngBackgroundNote}</p>
                 ) : null}
               </section>
             </div>
@@ -789,7 +830,7 @@ function App() {
             <div className="preview-header">
               <div className="surface-heading">
                 <span className="surface-heading__marker" aria-hidden="true" />
-                <h2>プレビュー</h2>
+                <h2>{t.previewTitle}</h2>
               </div>
               <button
                 type="button"
@@ -797,7 +838,7 @@ function App() {
                 onClick={() => void handleDownload()}
                 disabled={!sourceImage}
               >
-                <span className="button-label">保存する</span>
+                <span className="button-label">{t.saveLabel}</span>
                 <span className="button-icon">
                   <Icon name="arrow-right" />
                 </span>
@@ -807,10 +848,10 @@ function App() {
             <div className="preview-meta">
               <span>{outputWidth}×{outputHeight}</span>
               <span>{selectedResizeMode.label}</span>
-              <span>{selectedPalette.name}</span>
-              <span>{selectedPalette.colors.length}色</span>
+              <span>{selectedPaletteLabel}</span>
+              <span>{t.colorCountLabel(selectedPalette.colors.length)}</span>
               <span>{selectedFormat.label}</span>
-              {effectiveBackground ? <span>{effectiveBackground}</span> : <span>透過</span>}
+              {effectiveBackground ? <span>{effectiveBackground}</span> : <span>{t.transparentLabel}</span>}
             </div>
 
             <div className="preview-stage">
@@ -828,18 +869,49 @@ function App() {
                   <span className="preview-empty-icon">
                     <Icon name="image" />
                   </span>
-                  <strong>画像を追加するとここに表示されます</strong>
+                  <strong>{t.previewEmptyLabel}</strong>
                 </div>
               )}
             </div>
           </div>
         </section>
       </div>
+
+      {isLocalPreview ? (
+        <button
+          type="button"
+          className="view-toggle"
+          aria-pressed={isMobilePreview}
+          onClick={() => setIsMobilePreview((current) => !current)}
+        >
+          <span className="view-toggle__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" strokeWidth="2.5">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"
+              />
+            </svg>
+          </span>
+          <span className="view-toggle__label">
+            {isMobilePreview ? t.previewDesktopLabel : t.previewMobileLabel}
+          </span>
+        </button>
+      ) : null}
     </main>
   )
 }
 
 export default App
+
+function isLocalPreviewHost() {
+  const host = window.location.hostname.toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+}
+
+function hasMobilePreviewQuery() {
+  return new URLSearchParams(window.location.search).get('view') === 'mobile'
+}
 
 function SettingRow(props: { label: string; children: React.ReactNode }) {
   return (
@@ -998,37 +1070,30 @@ function Icon(props: { name: string }) {
   )
 }
 
-function loadCustomPalettes(): CustomPalette[] {
+function loadCustomPalettes(locale: Locale): CustomPalette[] {
+  const emptyPalette = (): CustomPalette => ({
+    id: 'custom-default',
+    name: STRINGS[locale].customPaletteFallback,
+    colors: [...DEFAULT_CUSTOM_COLORS],
+    isCustom: true,
+  })
+
   try {
     const raw = window.localStorage.getItem(CUSTOM_STORAGE_KEY)
 
     if (!raw) {
-      return [
-        {
-          id: 'custom-default',
-          name: 'カスタム',
-          colors: [...DEFAULT_CUSTOM_COLORS],
-          isCustom: true,
-        },
-      ]
+      return [emptyPalette()]
     }
 
     const parsed = JSON.parse(raw) as CustomPalette[]
 
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      return [
-        {
-          id: 'custom-default',
-          name: 'カスタム',
-          colors: [...DEFAULT_CUSTOM_COLORS],
-          isCustom: true,
-        },
-      ]
+      return [emptyPalette()]
     }
 
     return parsed.map((palette, index) => ({
       id: palette.id || `custom-loaded-${index}`,
-      name: palette.name || `カスタム${index + 1}`,
+      name: palette.name || STRINGS[locale].customPaletteName(index + 1),
       colors:
         Array.isArray(palette.colors) && palette.colors.length > 0
           ? palette.colors
@@ -1038,14 +1103,7 @@ function loadCustomPalettes(): CustomPalette[] {
       isCustom: true,
     }))
   } catch {
-    return [
-      {
-        id: 'custom-default',
-        name: 'カスタム',
-        colors: [...DEFAULT_CUSTOM_COLORS],
-        isCustom: true,
-      },
-    ]
+    return [emptyPalette()]
   }
 }
 
@@ -1070,7 +1128,7 @@ function loadImage(objectUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image()
     image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('画像を読み込めませんでした'))
+    image.onerror = () => reject(new Error('Failed to load image.'))
     image.src = objectUrl
   })
 }
