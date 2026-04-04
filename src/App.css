@@ -41,6 +41,8 @@
 .page-header {
   display: grid;
   gap: 16px;
+  position: relative;
+  z-index: 30;
 }
 
 .page-header {
