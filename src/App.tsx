@@ -1,9 +1,20 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  type ChangeEvent,
+  type DragEvent as ReactDragEvent,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react'
 import './App.css'
 import LanguageSwitcher from './components/LanguageSwitcher'
 import {
-  getPaletteName,
   getResizeModeLabels,
+  getPaletteName,
   getTopPageHref,
   readLocaleFromLocation,
   resolveInitialLocale,
@@ -42,9 +53,35 @@ type ResolvedPalette = PaletteDefinition & {
   isCustom: boolean
 }
 
+type HsvColor = {
+  h: number
+  s: number
+  v: number
+}
+
+type ImageFileHandle = {
+  getFile: () => Promise<File>
+}
+
+type PickerWindow = Window & {
+  showOpenFilePicker?: (options: {
+    multiple?: boolean
+    excludeAcceptAllOption?: boolean
+    types?: Array<{
+      description: string
+      accept: Record<string, string[]>
+    }>
+  }) => Promise<ImageFileHandle[]>
+}
+
 const CUSTOM_STORAGE_KEY = 'palette-pixelizer.custom-palettes.v1'
 const DEFAULT_SIZE = SIZE_PRESETS[3]
 const DEFAULT_PALETTE_KEY = `builtin:${BUILTIN_PALETTES[5].id}`
+const DEFAULT_PICKER_BACKGROUND = '#FFFFFF'
+const APP_VERSION = __APP_VERSION__
+const CONTACT_EMAIL = 'contact@zoochigames.com'
+const MARSHMALLOW_URL =
+  'https://marshmallow-qa.com/4q8wumfpc9uj4w6?t=WQvBkW&utm_medium=url_text&utm_source=promotion'
 const DEFAULT_ADJUSTMENTS: AdjustmentSettings = {
   hue: 0,
   saturation: 0,
@@ -64,14 +101,86 @@ const EXPORT_FORMAT_OPTIONS: Array<{
   { value: 'webp', label: 'WebP', mimeType: 'image/webp', extension: 'webp' },
 ]
 
+const BACKGROUND_COLOR_SWATCHES = [
+  '#FFFFFF',
+  '#E2E8F0',
+  '#94A3B8',
+  '#475569',
+  '#000000',
+  '#FEE2E2',
+  '#FB7185',
+  '#EC4899',
+  '#C084FC',
+  '#818CF8',
+  '#60A5FA',
+  '#67E8F9',
+  '#86EFAC',
+  '#FDE68A',
+  '#FDBA74',
+  '#A16207',
+  '#166534',
+  '#1D4ED8',
+] as const
+
+const SUPPORTED_IMAGE_EXTENSIONS = [
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.svg',
+  '.avif',
+] as const
+
+const SUPPORTED_IMAGE_TYPE_MAP: Record<string, string[]> = {
+  'image/png': ['.png'],
+  'image/jpeg': ['.jpg', '.jpeg'],
+  'image/gif': ['.gif'],
+  'image/webp': ['.webp'],
+  'image/bmp': ['.bmp'],
+  'image/x-ms-bmp': ['.bmp'],
+  'image/svg+xml': ['.svg'],
+  'image/avif': ['.avif'],
+}
+
+const SUPPORTED_IMAGE_MIME_TYPES = Object.keys(SUPPORTED_IMAGE_TYPE_MAP)
+const SUPPORTED_IMAGE_ACCEPT = [...SUPPORTED_IMAGE_MIME_TYPES, ...SUPPORTED_IMAGE_EXTENSIONS].join(',')
+const SUPPORTED_IMAGE_PICKER_TYPES = [
+  {
+    description: 'Supported images',
+    accept: SUPPORTED_IMAGE_TYPE_MAP,
+  },
+] as const
+
+type SelectOption = {
+  value: string
+  label: string
+}
+
+type SelectGroup = {
+  label?: string
+  options: SelectOption[]
+}
+
+type UploadNotice = {
+  title: string
+  message: string
+}
+
 function App() {
   const inputId = useId()
+  const contactDialogTitleId = useId()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const uploadNoticeTimerRef = useRef<number | null>(null)
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const compareCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const adjustmentPreviewCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const colorPickerRef = useRef<HTMLDivElement | null>(null)
   const [locale, setLocale] = useState<Locale>(() => resolveInitialLocale())
   const [sourceImage, setSourceImage] = useState<SourceImage | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [isInvalidDrag, setIsInvalidDrag] = useState(false)
   const [outputWidth, setOutputWidth] = useState(DEFAULT_SIZE.width)
   const [outputHeight, setOutputHeight] = useState(DEFAULT_SIZE.height)
   const [selectedPaletteKey, setSelectedPaletteKey] = useState(DEFAULT_PALETTE_KEY)
@@ -81,17 +190,30 @@ function App() {
     loadCustomPalettes(resolveInitialLocale()),
   )
   const [backgroundColor, setBackgroundColor] = useState('')
+  const [pickerColor, setPickerColor] = useState<HsvColor>(() => hexToHsv(DEFAULT_PICKER_BACKGROUND))
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false)
+  const [isColorPickerUpward, setIsColorPickerUpward] = useState(false)
   const [exportFormat, setExportFormat] = useState<ExportFormat>('png')
   const [isLocalPreview] = useState(() => isLocalPreviewHost())
   const [isMobilePreview, setIsMobilePreview] = useState(() => hasMobilePreviewQuery())
+  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
+    window.matchMedia('(max-width: 1023px)').matches,
+  )
+  const [isAdjustmentsOpen, setIsAdjustmentsOpen] = useState(false)
+  const [isSizeOutputOpen, setIsSizeOutputOpen] = useState(false)
+  const [isPaletteEditorOpen, setIsPaletteEditorOpen] = useState(false)
+  const [isShowingOriginal, setIsShowingOriginal] = useState(false)
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false)
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(false)
+  const [isEnterReady, setIsEnterReady] = useState(false)
+  const [uploadNotice, setUploadNotice] = useState<UploadNotice | null>(null)
 
   const t = STRINGS[locale]
-  const resizeModeLabels = getResizeModeLabels(locale)
-  const resizeModeOptions: Array<{ value: ResizeMode; label: string }> = [
-    { value: 'center-crop', label: resizeModeLabels['center-crop'] },
-    { value: 'contain', label: resizeModeLabels.contain },
-    { value: 'stretch', label: resizeModeLabels.stretch },
-  ]
+  const hasImage = Boolean(sourceImage)
+  const isCompactLayout = isMobilePreview || isNarrowViewport
+  const canExpandPreview = hasImage && isCompactLayout
+  const showExpandedPreview = canExpandPreview && isPreviewExpanded
+  const canComparePreview = hasImage && (!isCompactLayout || showExpandedPreview)
   const sizePreset = SIZE_PRESETS.find(
     (preset) => preset.width === outputWidth && preset.height === outputHeight,
   )
@@ -99,11 +221,10 @@ function App() {
   const selectedCustomPalette = selectedPalette.isCustom
     ? customPalettes.find((palette) => palette.id === selectedPalette.id) ?? null
     : null
-  const previewScale = Math.max(1, Math.floor(Math.min(520 / outputWidth, 520 / outputHeight)))
   const hasAdjustments = Object.values(adjustments).some((value) => value !== 0)
-  const selectedResizeMode =
-    resizeModeOptions.find((option) => option.value === resizeMode) ?? resizeModeOptions[0]
-  const effectiveBackground = backgroundColor || (exportFormat !== 'png' ? '#FFFFFF' : '')
+  const normalizedBackgroundColor = normalizeHexColor(backgroundColor)
+  const safeBackgroundColor = normalizedBackgroundColor ?? DEFAULT_PICKER_BACKGROUND
+  const effectiveBackground = normalizedBackgroundColor || (exportFormat !== 'png' ? '#FFFFFF' : '')
   const selectedFormat =
     EXPORT_FORMAT_OPTIONS.find((option) => option.value === exportFormat) ?? EXPORT_FORMAT_OPTIONS[0]
   const selectedPaletteLabel = getPaletteName(
@@ -113,10 +234,93 @@ function App() {
     selectedPalette.isCustom,
   )
   const topPageHref = getTopPageHref(locale, isMobilePreview)
+  const previewDisplay = fitWithinBox(
+    outputWidth,
+    outputHeight,
+    showExpandedPreview ? 320 : isCompactLayout ? 170 : 360,
+    true,
+  )
+  const sizeOutputSummary = `${outputWidth}×${outputHeight} / ${selectedFormat.label}`
+  const backgroundLabel = normalizedBackgroundColor ? normalizedBackgroundColor.toUpperCase() : t.transparentLabel
+  const hueSliderStyle = { '--mini-color-thumb': safeBackgroundColor } as CSSProperties
+  const paletteOptionGroups: SelectGroup[] = [
+    {
+      label: t.presetGroupLabel,
+      options: BUILTIN_PALETTES.map((palette) => ({
+        value: `builtin:${palette.id}`,
+        label: getPaletteName(locale, palette.id, palette.name, false),
+      })),
+    },
+    {
+      label: t.customGroupLabel,
+      options: customPalettes.map((palette) => ({
+        value: `custom:${palette.id}`,
+        label: palette.name,
+      })),
+    },
+  ]
+  const sizePresetOptionGroups: SelectGroup[] = [
+    {
+      options: [
+        ...SIZE_PRESETS.map((preset) => ({ value: preset.id, label: preset.label })),
+        { value: 'custom', label: t.customSizeLabel },
+      ],
+    },
+  ]
+  const exportFormatOptionGroups: SelectGroup[] = [
+    {
+      options: EXPORT_FORMAT_OPTIONS.map((option) => ({
+        value: option.value,
+        label: option.label,
+      })),
+    },
+  ]
+  const resizeModeLabels = getResizeModeLabels(locale)
+  const resizeModeOptionGroups: SelectGroup[] = [
+    {
+      options: [
+        { value: 'center-crop', label: resizeModeLabels['center-crop'] },
+        { value: 'contain', label: resizeModeLabels.contain },
+        { value: 'stretch', label: resizeModeLabels.stretch },
+      ],
+    },
+  ]
 
   useEffect(() => {
     window.localStorage.setItem(CUSTOM_STORAGE_KEY, JSON.stringify(customPalettes))
   }, [customPalettes])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setIsEnterReady(true)
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (uploadNoticeTimerRef.current !== null) {
+        window.clearTimeout(uploadNoticeTimerRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 1023px)')
+
+    function handleViewportChange(event: MediaQueryListEvent) {
+      setIsNarrowViewport(event.matches)
+    }
+
+    mediaQuery.addEventListener('change', handleViewportChange)
+
+    return () => {
+      mediaQuery.removeEventListener('change', handleViewportChange)
+    }
+  }, [])
 
   useEffect(() => {
     document.body.classList.toggle('mobile-preview', isMobilePreview)
@@ -127,6 +331,65 @@ function App() {
       document.body.classList.remove('is-local-preview')
     }
   }, [isLocalPreview, isMobilePreview])
+
+  useEffect(() => {
+    if (!isColorPickerOpen) {
+      return
+    }
+
+    setIsColorPickerUpward(resolvePopoverUpward(colorPickerRef.current))
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!colorPickerRef.current?.contains(event.target as Node)) {
+        setIsColorPickerOpen(false)
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsColorPickerOpen(false)
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isColorPickerOpen])
+
+  useEffect(() => {
+    if (!isContactModalOpen && !showExpandedPreview) {
+      return
+    }
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    function handleDocumentKeydown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return
+      }
+
+      event.preventDefault()
+      if (isContactModalOpen) {
+        setIsContactModalOpen(false)
+        return
+      }
+
+      setIsPreviewExpanded(false)
+      setIsShowingOriginal(false)
+    }
+
+    document.addEventListener('keydown', handleDocumentKeydown)
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleDocumentKeydown)
+    }
+  }, [isContactModalOpen, showExpandedPreview])
 
   useEffect(() => {
     syncLocaleState(locale, isMobilePreview, t.pageTitle)
@@ -171,7 +434,7 @@ function App() {
       return
     }
 
-    const previewSize = fitWithinBox(outputWidth, outputHeight, 180)
+    const previewSize = fitWithinBox(outputWidth, outputHeight, 180, true)
 
     renderAdjustedImage({
       canvas,
@@ -180,9 +443,17 @@ function App() {
       height: previewSize.height,
       adjustments,
       resizeMode,
-      backgroundColor: backgroundColor || undefined,
+      backgroundColor: normalizedBackgroundColor || undefined,
     })
-  }, [adjustments, backgroundColor, outputHeight, outputWidth, resizeMode, sourceImage])
+  }, [
+    adjustments,
+    isAdjustmentsOpen,
+    normalizedBackgroundColor,
+    outputHeight,
+    outputWidth,
+    resizeMode,
+    sourceImage,
+  ])
 
   useEffect(() => {
     const canvas = previewCanvasRef.current
@@ -211,10 +482,191 @@ function App() {
     })
   }, [adjustments, effectiveBackground, outputHeight, outputWidth, resizeMode, selectedPalette, sourceImage])
 
-  async function handleFileSelection(files: FileList | null): Promise<void> {
-    const file = files?.[0]
+  useEffect(() => {
+    const canvas = compareCanvasRef.current
 
-    if (!file || !file.type.startsWith('image/')) {
+    if (!canvas) {
+      return
+    }
+
+    if (!sourceImage) {
+      canvas.width = Math.max(previewDisplay.width, 1)
+      canvas.height = Math.max(previewDisplay.height, 1)
+      const context = canvas.getContext('2d')
+      context?.clearRect(0, 0, canvas.width, canvas.height)
+      return
+    }
+
+    renderAdjustedImage({
+      canvas,
+      image: sourceImage.image,
+      width: previewDisplay.width,
+      height: previewDisplay.height,
+      adjustments: DEFAULT_ADJUSTMENTS,
+      resizeMode,
+      backgroundColor: undefined,
+    })
+  }, [previewDisplay.height, previewDisplay.width, resizeMode, sourceImage])
+
+  function commitPickerColor(nextColor: HsvColor) {
+    setPickerColor(nextColor)
+    setBackgroundColor(hsvToHex(nextColor))
+  }
+
+  function syncBackgroundColorInput(nextValue: string) {
+    setBackgroundColor(nextValue)
+
+    const normalized = normalizeHexColor(nextValue)
+    if (!normalized) {
+      return
+    }
+
+    setPickerColor((current) => syncPickerColorWithHex(current, normalized))
+  }
+
+  function updateColorFromPlane(element: HTMLDivElement, clientX: number, clientY: number) {
+    const bounds = element.getBoundingClientRect()
+    const saturation = clamp((clientX - bounds.left) / bounds.width, 0, 1)
+    const value = 1 - clamp((clientY - bounds.top) / bounds.height, 0, 1)
+
+    commitPickerColor({
+      h: pickerColor.h,
+      s: saturation,
+      v: value,
+    })
+  }
+
+  function handleColorPlanePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault()
+
+    const element = event.currentTarget
+    const pointerId = event.pointerId
+
+    updateColorFromPlane(element, event.clientX, event.clientY)
+
+    try {
+      element.setPointerCapture(pointerId)
+    } catch {
+      // Pointer capture isn't available in every browser.
+    }
+
+    function cleanup() {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+
+      try {
+        element.releasePointerCapture(pointerId)
+      } catch {
+        // Ignore release failures for unsupported browsers.
+      }
+    }
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      updateColorFromPlane(element, moveEvent.clientX, moveEvent.clientY)
+    }
+
+    function handlePointerUp(moveEvent: PointerEvent) {
+      if (moveEvent.pointerId !== pointerId) {
+        return
+      }
+
+      cleanup()
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+  }
+
+  function handleHueChange(event: ChangeEvent<HTMLInputElement>) {
+    commitPickerColor({
+      h: Number(event.target.value),
+      s: pickerColor.s,
+      v: pickerColor.v,
+    })
+  }
+
+  function openColorPicker() {
+    setIsColorPickerUpward(resolvePopoverUpward(colorPickerRef.current))
+    setIsColorPickerOpen(true)
+  }
+
+  function toggleColorPicker() {
+    const nextOpen = !isColorPickerOpen
+
+    if (nextOpen) {
+      setIsColorPickerUpward(resolvePopoverUpward(colorPickerRef.current))
+    }
+
+    setIsColorPickerOpen(nextOpen)
+  }
+
+  function dismissUploadNotice(): void {
+    if (uploadNoticeTimerRef.current !== null) {
+      window.clearTimeout(uploadNoticeTimerRef.current)
+      uploadNoticeTimerRef.current = null
+    }
+
+    setUploadNotice(null)
+  }
+
+  function showUploadNotice(title: string, message: string): void {
+    if (uploadNoticeTimerRef.current !== null) {
+      window.clearTimeout(uploadNoticeTimerRef.current)
+    }
+
+    setUploadNotice({ title, message })
+    uploadNoticeTimerRef.current = window.setTimeout(() => {
+      uploadNoticeTimerRef.current = null
+      setUploadNotice(null)
+    }, 4200)
+  }
+
+  function resolveDraggedFileState(dataTransfer: DataTransfer | null): 'none' | 'valid' | 'invalid' {
+    if (!dataTransfer) {
+      return 'none'
+    }
+
+    const fileItems = Array.from(dataTransfer.items ?? []).filter((item) => item.kind === 'file')
+
+    if (fileItems.length === 0) {
+      return dataTransfer.files.length > 0
+        ? isImageFile(dataTransfer.files[0])
+          ? 'valid'
+          : 'invalid'
+        : 'none'
+    }
+
+    const firstItem = fileItems[0]
+    const resolvedFile = firstItem.getAsFile()
+
+    if (resolvedFile) {
+      return isImageFile(resolvedFile) ? 'valid' : 'invalid'
+    }
+
+    if (firstItem.type) {
+      return isSupportedImageMime(firstItem.type) ? 'valid' : 'invalid'
+    }
+
+    return 'valid'
+  }
+
+  function handleDragState(event: ReactDragEvent<HTMLElement>): void {
+    const dragState = resolveDraggedFileState(event.dataTransfer)
+    const isSupported = dragState === 'valid'
+    setIsDragging(dragState !== 'none')
+    setIsInvalidDrag(dragState === 'invalid')
+    event.dataTransfer.dropEffect = isSupported ? 'copy' : 'none'
+  }
+
+  async function handleSelectedFile(file: File | null): Promise<void> {
+    if (!file) {
+      return
+    }
+
+    if (!isImageFile(file)) {
+      showUploadNotice(t.unsupportedFileTitle, t.unsupportedFileMessage)
       return
     }
 
@@ -238,7 +690,37 @@ function App() {
       })
     } catch {
       URL.revokeObjectURL(objectUrl)
+      showUploadNotice(t.unreadableImageTitle, t.unreadableImageMessage)
     }
+  }
+
+  async function handleFileSelection(files: FileList | null): Promise<void> {
+    await handleSelectedFile(files?.[0] ?? null)
+  }
+
+  async function openImagePicker(): Promise<void> {
+    const pickerWindow = window as PickerWindow
+
+    if (pickerWindow.showOpenFilePicker) {
+      try {
+        const [handle] = await pickerWindow.showOpenFilePicker({
+          multiple: false,
+          excludeAcceptAllOption: true,
+          types: [...SUPPORTED_IMAGE_PICKER_TYPES],
+        })
+
+        const file = await handle?.getFile()
+        await handleSelectedFile(file ?? null)
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+      }
+
+      return
+    }
+
+    fileInputRef.current?.click()
   }
 
   function handleSizePresetChange(nextValue: string): void {
@@ -293,7 +775,12 @@ function App() {
     }))
   }
 
-  function handleCreateCustomPalette(): void {
+  function handlePaletteEdit(): void {
+    if (selectedCustomPalette) {
+      setIsPaletteEditorOpen((current) => !current)
+      return
+    }
+
     const nextIndex = customPalettes.length + 1
     const nextPalette: CustomPalette = {
       id: `custom-${Date.now()}`,
@@ -308,6 +795,15 @@ function App() {
 
     setCustomPalettes((current) => [...current, nextPalette])
     setSelectedPaletteKey(`custom:${nextPalette.id}`)
+    setIsPaletteEditorOpen(true)
+  }
+
+  function handlePaletteSelectionChange(nextKey: string): void {
+    setSelectedPaletteKey(nextKey)
+
+    if (!nextKey.startsWith('custom:')) {
+      setIsPaletteEditorOpen(false)
+    }
   }
 
   function handleCustomPaletteNameChange(nextName: string): void {
@@ -392,9 +888,12 @@ function App() {
       current.filter((palette) => palette.id !== selectedCustomPalette.id),
     )
     setSelectedPaletteKey(DEFAULT_PALETTE_KEY)
+    setIsPaletteEditorOpen(false)
   }
 
   function clearSourceImage(): void {
+    setIsPreviewExpanded(false)
+    setIsShowingOriginal(false)
     setSourceImage((current) => {
       if (current) {
         URL.revokeObjectURL(current.objectUrl)
@@ -402,6 +901,40 @@ function App() {
 
       return null
     })
+  }
+
+  function openExpandedPreview(): void {
+    if (!canExpandPreview) {
+      return
+    }
+
+    setIsPreviewExpanded(true)
+  }
+
+  function closeExpandedPreview(): void {
+    setIsPreviewExpanded(false)
+    setIsShowingOriginal(false)
+  }
+
+  function handlePreviewArtworkClick(): void {
+    if (!canExpandPreview || showExpandedPreview) {
+      return
+    }
+
+    openExpandedPreview()
+  }
+
+  function handlePreviewArtworkKeyDown(event: React.KeyboardEvent<HTMLDivElement>): void {
+    if (!canExpandPreview || showExpandedPreview) {
+      return
+    }
+
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+
+    event.preventDefault()
+    openExpandedPreview()
   }
 
   async function handleDownload(): Promise<void> {
@@ -436,9 +969,13 @@ function App() {
   }
 
   return (
-    <main className={`app ${isMobilePreview ? 'is-mobile-preview' : ''}`}>
+    <main
+      className={`app ${isMobilePreview ? 'is-mobile-preview' : ''} ${
+        isCompactLayout ? 'is-compact-layout' : ''
+      } ${hasImage ? 'has-image' : 'is-empty'} ${isEnterReady ? 'is-enter-ready' : ''}`}
+    >
       <header className="page-header">
-        <div className="document-toolbar">
+        <div className="document-toolbar enter-stage enter-stage--1">
           <div className="document-toolbar__controls">
             <a
               className="document-home-link"
@@ -452,7 +989,7 @@ function App() {
           </div>
         </div>
 
-        <section className="header-card solid-shadow">
+        <section className="header-card solid-shadow enter-stage enter-stage--2">
           <div className="header-card__hero">
             <div className="wobble-container app-card__wobble app-card__wobble--negative" aria-hidden="true">
               <div className="wobble-target app-badge app-badge--palette">
@@ -468,97 +1005,125 @@ function App() {
         </section>
       </header>
 
-      <div className="workspace">
-        <aside className="settings-pane">
-          <div className="tool-surface solid-shadow">
-            <div className="surface-heading">
-              <span className="surface-heading__marker" aria-hidden="true" />
-              <h2>{t.settingsHeading}</h2>
+      <div className={`workspace workspace--refresh ${isCompactLayout ? 'is-compact' : ''}`}>
+        <aside className="settings-column">
+          <section className="panel-card panel-card--image solid-shadow enter-stage enter-stage--3">
+            <div className="panel-card__heading">
+              <div className="panel-title">
+                <Icon name="image" />
+                <h2>{t.imageSectionTitle}</h2>
+              </div>
+              {sourceImage ? (
+                <button
+                  type="button"
+                  className="secondary-button secondary-button--inline secondary-button--accent-hover"
+                  onClick={clearSourceImage}
+                >
+                  <Icon name="trash" />
+                  {t.removeLabel}
+                </button>
+              ) : null}
             </div>
 
-            <div className="surface-scroll custom-scrollbar">
-              <section className="section-card pane-section">
-                <div className="section-card__title">
-                  <Icon name="image" />
-                  <h2>{t.imageSectionTitle}</h2>
-                </div>
+            <input
+              id={inputId}
+              ref={fileInputRef}
+              type="file"
+              accept={SUPPORTED_IMAGE_ACCEPT}
+              className="sr-only"
+              onChange={(event) => {
+                void handleFileSelection(event.target.files)
+                event.currentTarget.value = ''
+              }}
+            />
 
-                <label
-                  className={`dropzone ${isDragging ? 'dropzone-active' : ''}`}
-                  htmlFor={inputId}
-                  onDragEnter={(event) => {
+            {!sourceImage ? (
+              <label
+                className={`dropzone dropzone--refresh ${isDragging ? 'dropzone-active' : ''} ${
+                  isInvalidDrag ? 'is-invalid-drag' : ''
+                }`}
+                htmlFor={inputId}
+                onClick={(event) => {
+                  if ((window as PickerWindow).showOpenFilePicker) {
                     event.preventDefault()
-                    setIsDragging(true)
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault()
-                    setIsDragging(true)
-                  }}
-                  onDragLeave={(event) => {
-                    event.preventDefault()
-                    if (event.currentTarget === event.target) {
-                      setIsDragging(false)
-                    }
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault()
+                    void openImagePicker()
+                  }
+                }}
+                onDragEnter={(event) => {
+                  event.preventDefault()
+                  handleDragState(event)
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault()
+                  handleDragState(event)
+                }}
+                onDragLeave={(event) => {
+                  event.preventDefault()
+                  if (event.currentTarget === event.target) {
                     setIsDragging(false)
-                    void handleFileSelection(event.dataTransfer.files)
-                  }}
-                >
-                  <span className="dropzone-icon">
-                    <Icon name="upload" />
-                  </span>
-                  <div className="dropzone-copy">
-                    <strong>{t.dropzoneTitle}</strong>
-                    <span>{t.dropzoneSubtitle}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={(event) => {
-                      event.preventDefault()
-                      fileInputRef.current?.click()
-                    }}
-                  >
-                    {t.chooseImageLabel}
-                  </button>
-                </label>
+                    setIsInvalidDrag(false)
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  setIsDragging(false)
+                  const dragState = resolveDraggedFileState(event.dataTransfer)
+                  setIsInvalidDrag(false)
 
-                <input
-                  id={inputId}
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  onChange={(event) => void handleFileSelection(event.target.files)}
-                />
+                  if (dragState === 'invalid') {
+                    showUploadNotice(t.unsupportedFileTitle, t.unsupportedFileMessage)
+                    return
+                  }
 
-                {sourceImage ? (
-                  <div className="source-meta">
-                    <img src={sourceImage.objectUrl} alt="" className="source-thumb" />
-                    <div className="source-copy">
-                      <strong>{sourceImage.fileName}</strong>
-                      <span>{t.originalImageLabel(sourceImage.width, sourceImage.height)}</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="icon-button icon-button-quiet"
-                      onClick={clearSourceImage}
-                      aria-label={t.removeImageAria}
-                    >
-                      <Icon name="x" />
-                    </button>
-                  </div>
-                ) : null}
-              </section>
+                  void handleFileSelection(event.dataTransfer.files)
+                }}
+              >
+                <span className="dropzone-icon dropzone-icon--refresh">
+                  <Icon name="upload" />
+                </span>
+                <div className="dropzone-copy dropzone-copy--refresh">
+                  <strong>{t.dropzoneTitle}</strong>
+                  {t.dropzoneSubtitle ? <span>{t.dropzoneSubtitle}</span> : null}
+                </div>
+              </label>
+            ) : (
+              <div
+                className="image-source-row"
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  void openImagePicker()
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    void openImagePicker()
+                  }
+                }}
+              >
+                <div className="image-source-row__thumb-wrap">
+                  <img src={sourceImage.objectUrl} alt="" className="image-source-row__thumb" />
+                </div>
+                <div className="image-source-row__copy">
+                  <strong>{sourceImage.fileName}</strong>
+                  <span>{t.originalImageLabel(sourceImage.width, sourceImage.height)}</span>
+                </div>
+              </div>
+            )}
+          </section>
 
-              <section className="section-card pane-section section-card--warm">
-                <div className="section-header-row">
-                  <div className="section-card__title">
-                    <Icon name="sun" />
-                    <h2>{t.adjustmentsTitle}</h2>
-                  </div>
+          {hasImage ? (
+            <>
+              <AccordionCard
+                title={t.adjustmentsTitle}
+                iconName="sliders"
+                isOpen={isAdjustmentsOpen}
+                onToggle={() => setIsAdjustmentsOpen((current) => !current)}
+                rightContent={t.beforePaletteLabel}
+                className="enter-stage enter-stage--4"
+              >
+                <div className="accordion-card__toolbar">
+                  <p className="accordion-note">{t.beforePaletteLabel}</p>
                   <button
                     type="button"
                     className="text-button"
@@ -569,178 +1134,93 @@ function App() {
                   </button>
                 </div>
 
-                <SettingRow label={t.hueLabel}>
-                  <AdjustmentControl
+                <div className="slider-stack">
+                  <CompactSlider
+                    label={t.hueLabel}
                     value={adjustments.hue}
                     min={-180}
                     max={180}
                     onChange={(value) => handleAdjustmentChange('hue', value)}
                   />
-                </SettingRow>
-
-                <SettingRow label={t.saturationLabel}>
-                  <AdjustmentControl
+                  <CompactSlider
+                    label={t.saturationLabel}
                     value={adjustments.saturation}
                     min={-100}
                     max={100}
                     onChange={(value) => handleAdjustmentChange('saturation', value)}
                   />
-                </SettingRow>
-
-                <SettingRow label={t.brightnessLabel}>
-                  <AdjustmentControl
+                  <CompactSlider
+                    label={t.brightnessLabel}
                     value={adjustments.brightness}
                     min={-100}
                     max={100}
                     onChange={(value) => handleAdjustmentChange('brightness', value)}
                   />
-                </SettingRow>
+                </div>
 
-                <div className="section-divider" aria-hidden="true" />
-
-                <div className="adjustment-preview">
-                  <div className="adjustment-preview-header">
+                <div className="mini-preview">
+                  <div className="mini-preview__header">
                     <strong>{t.adjustmentPreviewTitle}</strong>
                     <span>{t.beforePaletteLabel}</span>
                   </div>
-                  <div className="adjustment-preview-frame">
+                  <div className="mini-preview__frame">
                     {sourceImage ? (
-                      <canvas
-                        ref={adjustmentPreviewCanvasRef}
-                        className="adjustment-preview-canvas"
-                      />
+                      <canvas ref={adjustmentPreviewCanvasRef} className="mini-preview__canvas" />
                     ) : (
-                      <span className="adjustment-preview-empty">{t.adjustmentPreviewEmpty}</span>
+                      <span className="mini-preview__empty">{t.adjustmentPreviewEmpty}</span>
                     )}
                   </div>
                 </div>
-              </section>
+              </AccordionCard>
 
-              <section className="section-card pane-section">
-                <div className="section-card__title">
-                  <Icon name="sliders" />
-                  <h2>{t.sizeTitle}</h2>
-                </div>
-
-                <SettingRow label={t.presetLabel}>
-                  <select
-                    value={sizePreset?.id ?? 'custom'}
-                    onChange={(event) => handleSizePresetChange(event.target.value)}
-                  >
-                    {SIZE_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.label}
-                      </option>
-                    ))}
-                    <option value="custom">{t.customSizeLabel}</option>
-                  </select>
-                </SettingRow>
-
-                <SettingRow label={t.widthLabel}>
-                  <input
-                    type="number"
-                    min={1}
-                    max={256}
-                    value={outputWidth}
-                    onChange={(event) => handleDimensionChange('width', event.target.value)}
-                  />
-                </SettingRow>
-
-                <SettingRow label={t.heightLabel}>
-                  <input
-                    type="number"
-                    min={1}
-                    max={256}
-                    value={outputHeight}
-                    onChange={(event) => handleDimensionChange('height', event.target.value)}
-                  />
-                </SettingRow>
-
-                <SettingRow label={t.resizeLabel}>
-                  <select
-                    value={resizeMode}
-                    onChange={(event) => setResizeMode(event.target.value as ResizeMode)}
-                  >
-                    {resizeModeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </SettingRow>
-              </section>
-
-              <section className="section-card pane-section">
-                <div className="section-card__title">
-                  <Icon name="palette" />
-                  <h2>{t.paletteTitle}</h2>
-                </div>
-
-                <SettingRow label={t.selectionLabel}>
-                  <div className="palette-picker-row">
-                    <select
-                      value={selectedPaletteKey}
-                      onChange={(event) => setSelectedPaletteKey(event.target.value)}
-                    >
-                      <optgroup label={t.presetGroupLabel}>
-                        {BUILTIN_PALETTES.map((palette) => (
-                          <option key={palette.id} value={`builtin:${palette.id}`}>
-                            {getPaletteName(locale, palette.id, palette.name, false)}
-                          </option>
-                        ))}
-                      </optgroup>
-                      <optgroup label={t.customGroupLabel}>
-                        {customPalettes.map((palette) => (
-                          <option key={palette.id} value={`custom:${palette.id}`}>
-                            {palette.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    </select>
-                    <button type="button" className="icon-button" onClick={handleCreateCustomPalette}>
-                      <Icon name="plus" />
-                      <span>{t.newPaletteLabel}</span>
-                    </button>
+              <section className="panel-card panel-card--palette solid-shadow enter-stage enter-stage--5">
+                <div className="panel-card__heading">
+                  <div className="panel-title">
+                    <Icon name="palette" />
+                    <h2>{t.paletteTitle}</h2>
                   </div>
-                </SettingRow>
+                </div>
 
-                <div className="palette-strip" aria-label={t.selectedColorsAria}>
+                <div className="palette-selector-row">
+                  <CustomSelect
+                    ariaLabel={t.paletteTitle}
+                    value={selectedPaletteKey}
+                    groups={paletteOptionGroups}
+                    onChange={handlePaletteSelectionChange}
+                    className="field-select field-select--palette"
+                  />
+                  <button type="button" className="secondary-button" onClick={handlePaletteEdit}>
+                    {t.editPaletteLabel}
+                  </button>
+                </div>
+
+                <div className="palette-strip palette-strip--refresh" aria-label={t.selectedColorsAria}>
                   {selectedPalette.colors.map((color) => (
                     <span
                       key={`${selectedPalette.id}-${color}`}
-                      className="palette-chip"
+                      className="palette-chip palette-chip--refresh"
                       style={{ backgroundColor: color }}
                       title={color}
                     />
                   ))}
                 </div>
 
-                {selectedCustomPalette ? (
-                  <div className="custom-palette-editor">
-                    <SettingRow label={t.paletteNameLabel}>
+                {isPaletteEditorOpen && selectedCustomPalette ? (
+                  <div className="palette-editor-card">
+                    <Field label={t.paletteNameLabel}>
                       <input
                         type="text"
                         value={selectedCustomPalette.name}
                         onChange={(event) => handleCustomPaletteNameChange(event.target.value)}
                       />
-                    </SettingRow>
+                    </Field>
 
-                    <div className="color-list">
+                    <div className="color-list color-list--refresh">
                       {selectedCustomPalette.colors.map((color, index) => (
-                        <div className="color-row" key={`${selectedCustomPalette.id}-${index}`}>
-                          <span className="color-index">{index + 1}</span>
-                          <input
-                            type="color"
+                        <div className="color-row color-row--refresh" key={`${selectedCustomPalette.id}-${index}`}>
+                          <PaletteColorPickerButton
                             value={color}
-                            aria-label={t.colorInputAria(index + 1)}
-                            onChange={(event) =>
-                              handleCustomColorChange(index, event.target.value.toUpperCase())
-                            }
-                          />
-                          <HexColorField
-                            key={`${selectedCustomPalette.id}-${index}-${color}`}
-                            value={color}
-                            ariaLabel={t.colorHexAria(index + 1)}
+                            ariaLabel={t.colorInputAria(index + 1)}
                             onCommit={(nextColor) => handleCustomColorChange(index, nextColor)}
                           />
                           <button
@@ -750,13 +1230,13 @@ function App() {
                             disabled={selectedCustomPalette.colors.length <= 1}
                             aria-label={t.deleteColorAria(index + 1)}
                           >
-                            <Icon name="trash" />
+                            <Icon name="x" />
                           </button>
                         </div>
                       ))}
                     </div>
 
-                    <div className="custom-actions">
+                    <div className="custom-actions custom-actions--refresh">
                       <button type="button" className="text-button" onClick={handleAddCustomColor}>
                         <Icon name="plus" />
                         <span>{t.addColorLabel}</span>
@@ -766,7 +1246,6 @@ function App() {
                         className="text-button text-button-danger"
                         onClick={handleDeleteCustomPalette}
                       >
-                        <Icon name="trash" />
                         <span>{t.deletePaletteLabel}</span>
                       </button>
                     </div>
@@ -774,115 +1253,483 @@ function App() {
                 ) : null}
               </section>
 
-              <section className="section-card pane-section">
-                <div className="section-card__title">
-                  <Icon name="save" />
-                  <h2>{t.outputTitle}</h2>
-                </div>
+              <AccordionCard
+                title={t.sizeTitle}
+                iconName="maximize"
+                isOpen={isSizeOutputOpen}
+                onToggle={() => setIsSizeOutputOpen((current) => !current)}
+                rightContent={sizeOutputSummary}
+                className="enter-stage enter-stage--6"
+              >
+                <div className="settings-stack settings-stack--size-output">
+                  <Field label={t.presetLabel}>
+                    <CustomSelect
+                      ariaLabel={t.presetLabel}
+                      value={sizePreset?.id ?? 'custom'}
+                      groups={sizePresetOptionGroups}
+                      onChange={handleSizePresetChange}
+                      className="field-select"
+                    />
+                  </Field>
 
-                <SettingRow label={t.backgroundColorLabel}>
-                  <div className="bg-color-control">
-                    <button
-                      type="button"
-                      className={`bg-chip ${!backgroundColor ? 'bg-chip-active' : ''}`}
-                      onClick={() => setBackgroundColor('')}
-                    >
-                      {t.transparentLabel}
-                    </button>
-                    <input
-                      type="color"
-                      value={backgroundColor || '#FFFFFF'}
-                      onChange={(event) => setBackgroundColor(event.target.value.toUpperCase())}
-                    />
-                    <HexColorField
-                      key={`bg-${backgroundColor}`}
-                      value={backgroundColor || ''}
-                      ariaLabel={t.backgroundHexAria}
-                      placeholder="#FFFFFF"
-                      onCommit={(nextColor) => setBackgroundColor(nextColor)}
-                    />
+                  <div className="dimension-grid dimension-grid--size-output">
+                    <Field label={t.widthLabel}>
+                      <input
+                        type="number"
+                        min={1}
+                        max={256}
+                        value={outputWidth}
+                        onChange={(event) => handleDimensionChange('width', event.target.value)}
+                      />
+                    </Field>
+                    <Field label={t.heightLabel}>
+                      <input
+                        type="number"
+                        min={1}
+                        max={256}
+                        value={outputHeight}
+                        onChange={(event) => handleDimensionChange('height', event.target.value)}
+                      />
+                    </Field>
                   </div>
-                </SettingRow>
 
-                <SettingRow label={t.exportFormatLabel}>
-                  <select
-                    value={exportFormat}
-                    onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
-                  >
-                    {EXPORT_FORMAT_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </SettingRow>
+                  <Field label={t.resizeLabel}>
+                    <CustomSelect
+                      ariaLabel={t.resizeLabel}
+                      value={resizeMode}
+                      groups={resizeModeOptionGroups}
+                      onChange={(value) => setResizeMode(value as ResizeMode)}
+                      className="field-select"
+                    />
+                  </Field>
 
-                {exportFormat !== 'png' && !backgroundColor ? (
-                  <p className="setting-note">{t.nonPngBackgroundNote}</p>
-                ) : null}
-              </section>
-            </div>
-          </div>
+                  <div className="size-output-divider" aria-hidden="true" />
+
+                  <div className="settings-grid settings-grid--size-output">
+                    <Field label={t.backgroundColorLabel}>
+                      <div className="mini-color-field mini-color-field--refresh" ref={colorPickerRef}>
+                        <div
+                          className={`mini-color-row mini-color-row--refresh ${isColorPickerOpen ? 'is-open' : ''} ${
+                            !normalizedBackgroundColor ? 'is-transparent' : ''
+                          }`}
+                          onPointerDown={(event) => {
+                            event.preventDefault()
+                            openColorPicker()
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className={`mini-color-swatch-button ${
+                              isColorPickerOpen ? 'is-open' : ''
+                            } ${!normalizedBackgroundColor ? 'is-transparent' : ''}`}
+                            style={
+                              normalizedBackgroundColor
+                                ? { backgroundColor: safeBackgroundColor }
+                                : undefined
+                            }
+                            aria-label={`${t.backgroundColorLabel}: ${backgroundLabel}`}
+                            aria-expanded={isColorPickerOpen}
+                            aria-haspopup="dialog"
+                            onPointerDown={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              toggleColorPicker()
+                            }}
+                          >
+                            <span className="visually-hidden">{backgroundLabel}</span>
+                          </button>
+
+                          <input
+                            className="mini-input--hex mini-color-row__display"
+                            type="text"
+                            value={backgroundLabel}
+                            readOnly
+                            aria-label={`${t.backgroundColorLabel}: ${backgroundLabel}`}
+                            aria-expanded={isColorPickerOpen}
+                            aria-haspopup="dialog"
+                            spellCheck={false}
+                            onPointerDown={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              openColorPicker()
+                            }}
+                            onFocus={() => openColorPicker()}
+                          />
+
+                          <button
+                            type="button"
+                            className="mini-color-row__toggle"
+                            aria-label={t.backgroundColorLabel}
+                            aria-expanded={isColorPickerOpen}
+                            aria-haspopup="dialog"
+                            onPointerDown={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              toggleColorPicker()
+                            }}
+                          >
+                            <span className="field-chevron" aria-hidden="true">
+                              <svg viewBox="0 0 24 24" strokeWidth="3">
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="m19.5 8.25-7.5 7.5-7.5-7.5"
+                                />
+                              </svg>
+                            </span>
+                          </button>
+                        </div>
+
+                        {isColorPickerOpen ? (
+                          <div
+                            className={`mini-color-popover mini-color-popover--refresh ${
+                              isColorPickerUpward ? 'is-open-upward' : ''
+                            }`}
+                            role="dialog"
+                            aria-label={t.backgroundColorLabel}
+                          >
+                            <div className="mini-color-popover__toolbar">
+                              <button
+                                type="button"
+                                className={`mini-color-transparent ${!normalizedBackgroundColor ? 'is-selected' : ''}`}
+                                onClick={() => setBackgroundColor('')}
+                              >
+                                {t.transparentLabel}
+                              </button>
+                            </div>
+
+                            <div className="mini-color-popover__preview">
+                              <span
+                                className={`mini-color-popover__preview-swatch ${
+                                  !normalizedBackgroundColor ? 'is-transparent' : ''
+                                }`}
+                                style={
+                                  normalizedBackgroundColor
+                                    ? { backgroundColor: safeBackgroundColor }
+                                    : undefined
+                                }
+                                aria-hidden="true"
+                              />
+                              <input
+                                className="mini-input mini-input--hex mini-color-popover__hex"
+                                type="text"
+                                value={backgroundColor}
+                                onChange={(event) => syncBackgroundColorInput(event.target.value.trim())}
+                                placeholder="#FFFFFF"
+                                spellCheck={false}
+                                autoFocus
+                              />
+                            </div>
+
+                            <div
+                              className="mini-color-plane"
+                              style={{ backgroundColor: hsvToHex({ h: pickerColor.h, s: 1, v: 1 }) }}
+                              onPointerDown={handleColorPlanePointerDown}
+                            >
+                              <span
+                                className="mini-color-plane__pointer"
+                                style={{
+                                  left: `${pickerColor.s * 100}%`,
+                                  top: `${(1 - pickerColor.v) * 100}%`,
+                                }}
+                              />
+                            </div>
+
+                            <div className="mini-color-hue-wrap">
+                              <input
+                                className="mini-color-hue"
+                                type="range"
+                                min={0}
+                                max={360}
+                                step={1}
+                                value={Math.round(pickerColor.h)}
+                                style={hueSliderStyle}
+                                onChange={handleHueChange}
+                                aria-label={t.backgroundColorLabel}
+                              />
+                            </div>
+
+                            <div className="mini-color-popover__swatches">
+                              {BACKGROUND_COLOR_SWATCHES.map((color) => (
+                                <button
+                                  key={color}
+                                  type="button"
+                                  className={`mini-color-option ${safeBackgroundColor === color && normalizedBackgroundColor ? 'is-selected' : ''}`}
+                                  style={{ backgroundColor: color }}
+                                  aria-label={`${t.backgroundColorLabel}: ${color.toUpperCase()}`}
+                                  title={color.toUpperCase()}
+                                  onClick={() => syncBackgroundColorInput(color)}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </Field>
+
+                    <Field label={t.exportFormatLabel}>
+                      <CustomSelect
+                        ariaLabel={t.exportFormatLabel}
+                        value={exportFormat}
+                        groups={exportFormatOptionGroups}
+                        onChange={(value) => setExportFormat(value as ExportFormat)}
+                        className="field-select"
+                      />
+                    </Field>
+                  </div>
+
+                  {exportFormat !== 'png' && !normalizedBackgroundColor ? (
+                    <p className="setting-note">{t.nonPngBackgroundNote}</p>
+                  ) : null}
+                </div>
+              </AccordionCard>
+            </>
+          ) : null}
         </aside>
 
-        <section className="preview-pane">
-          <div className="tool-surface preview-surface solid-shadow">
-            <div className="preview-header">
-              <div className="surface-heading">
-                <span className="surface-heading__marker" aria-hidden="true" />
+        <section className={`preview-column ${showExpandedPreview ? 'is-expanded-layer' : ''}`}>
+          {showExpandedPreview ? (
+            <button
+              type="button"
+              className="preview-overlay-backdrop"
+              aria-label={t.closePreviewLabel}
+              onClick={closeExpandedPreview}
+            />
+          ) : null}
+
+          <div
+            className={`preview-shell solid-shadow enter-stage enter-stage--7 ${
+              showExpandedPreview ? 'is-expanded' : ''
+            } ${canExpandPreview && !showExpandedPreview ? 'is-inline-compact' : ''}`}
+          >
+            <div className="preview-shell__header">
+              <div className="preview-shell__title">
+                <Icon name="eye" className="preview-shell__lead-icon" />
                 <h2>{t.previewTitle}</h2>
               </div>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => void handleDownload()}
-                disabled={!sourceImage}
-              >
-                <span className="button-label">{t.saveLabel}</span>
-                <span className="button-icon">
-                  <Icon name="arrow-right" />
-                </span>
-              </button>
+
+              <div className="preview-shell__actions">
+                {canExpandPreview ? (
+                  <button
+                    type="button"
+                    className="icon-button icon-button-quiet preview-shell__expand-button"
+                    aria-label={showExpandedPreview ? t.closePreviewLabel : t.expandPreviewLabel}
+                    onClick={showExpandedPreview ? closeExpandedPreview : openExpandedPreview}
+                  >
+                    <Icon name={showExpandedPreview ? 'x' : 'maximize'} />
+                  </button>
+                ) : null}
+
+                <button
+                  type="button"
+                  className="preview-save-button toy-btn"
+                  onClick={() => void handleDownload()}
+                  disabled={!sourceImage}
+                >
+                  <span className="preview-save-button__label">{t.saveLabel}</span>
+                  <span className="preview-save-button__icon" aria-hidden="true">
+                    <Icon name="download" />
+                  </span>
+                </button>
+              </div>
             </div>
 
-            <div className="preview-meta">
-              <span>{outputWidth}×{outputHeight}</span>
-              <span>{selectedResizeMode.label}</span>
-              <span>{selectedPaletteLabel}</span>
-              <span>{t.colorCountLabel(selectedPalette.colors.length)}</span>
-              <span>{selectedFormat.label}</span>
-              {effectiveBackground ? <span>{effectiveBackground}</span> : <span>{t.transparentLabel}</span>}
-            </div>
-
-            <div className="preview-stage">
-              {sourceImage ? (
-                <canvas
-                  ref={previewCanvasRef}
-                  className="preview-canvas"
-                  style={{
-                    width: `${outputWidth * previewScale}px`,
-                    height: `${outputHeight * previewScale}px`,
-                  }}
-                />
-              ) : (
-                <div className="preview-empty">
-                  <span className="preview-empty-icon">
+            <div className={`preview-stage preview-stage--refresh ${sourceImage ? 'has-image' : 'is-empty'}`}>
+              {!sourceImage ? (
+                <div className="preview-empty preview-empty--refresh">
+                  <span className="preview-empty-icon preview-empty-icon--refresh">
                     <Icon name="image" />
                   </span>
                   <strong>{t.previewEmptyLabel}</strong>
                 </div>
+              ) : (
+                <>
+                  <div
+                    className={`preview-artwork ${isShowingOriginal ? 'is-showing-original' : ''}`}
+                    style={{ width: `${previewDisplay.width}px`, height: `${previewDisplay.height}px` }}
+                    role={canExpandPreview && !showExpandedPreview ? 'button' : undefined}
+                    tabIndex={canExpandPreview && !showExpandedPreview ? 0 : undefined}
+                    aria-label={canExpandPreview && !showExpandedPreview ? t.expandPreviewLabel : undefined}
+                    onClick={handlePreviewArtworkClick}
+                    onKeyDown={handlePreviewArtworkKeyDown}
+                    onPointerDown={
+                      canComparePreview
+                        ? (event) => {
+                            event.preventDefault()
+                            event.currentTarget.setPointerCapture?.(event.pointerId)
+                            setIsShowingOriginal(true)
+                          }
+                        : undefined
+                    }
+                    onPointerUp={
+                      canComparePreview
+                        ? (event) => {
+                            event.currentTarget.releasePointerCapture?.(event.pointerId)
+                            setIsShowingOriginal(false)
+                          }
+                        : undefined
+                    }
+                    onPointerLeave={canComparePreview ? () => setIsShowingOriginal(false) : undefined}
+                    onPointerCancel={canComparePreview ? () => setIsShowingOriginal(false) : undefined}
+                    onLostPointerCapture={canComparePreview ? () => setIsShowingOriginal(false) : undefined}
+                  >
+                    <canvas
+                      ref={compareCanvasRef}
+                      className={`preview-canvas preview-canvas--compare ${
+                        isShowingOriginal ? 'is-visible' : 'is-hidden'
+                      }`}
+                      style={{ width: `${previewDisplay.width}px`, height: `${previewDisplay.height}px` }}
+                    />
+                    <canvas
+                      ref={previewCanvasRef}
+                      className={`preview-canvas preview-canvas--pixel ${
+                        isShowingOriginal ? 'is-hidden' : 'is-visible'
+                      }`}
+                      style={{ width: `${previewDisplay.width}px`, height: `${previewDisplay.height}px` }}
+                    />
+
+                    <div
+                      className={`compare-chip ${isShowingOriginal ? 'is-active' : ''} ${
+                        showExpandedPreview ? 'is-persisted' : ''
+                      }`}
+                      aria-hidden="true"
+                    >
+                      <Icon name="eye" />
+                      <span>{t.compareHoldLabel}</span>
+                    </div>
+                  </div>
+
+                  <div className="preview-chip-row">
+                    <span className="preview-chip">{outputWidth}×{outputHeight}</span>
+                    <span className="preview-chip">{selectedPaletteLabel}</span>
+                    <span className="preview-chip">{selectedFormat.label}</span>
+                  </div>
+                </>
               )}
             </div>
           </div>
         </section>
       </div>
 
+      <footer className="app-footer enter-stage enter-stage--8">
+        <button
+          type="button"
+          className="secondary-button app-footer__contact-button btn-wobble-group"
+          onClick={() => setIsContactModalOpen(true)}
+        >
+          <span className="wobble-container" aria-hidden="true">
+            <span className="wobble-target app-footer__contact-symbol">
+              <ContactGlyph />
+            </span>
+          </span>
+          {t.contactButtonLabel}
+        </button>
+      </footer>
+
+      {isContactModalOpen ? (
+        <div
+          className="contact-modal-backdrop"
+          role="presentation"
+          onClick={() => setIsContactModalOpen(false)}
+        >
+          <section
+            className="contact-modal solid-shadow"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={contactDialogTitleId}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="contact-modal__header">
+              <div className="contact-modal__title-wrap">
+                <span className="wobble-container" aria-hidden="true">
+                  <span className="wobble-target contact-modal__title-icon">
+                    <ContactGlyph />
+                  </span>
+                </span>
+                <div className="contact-modal__title-copy">
+                  <h2 id={contactDialogTitleId}>{t.contactDialogTitle}</h2>
+                  <p>{t.contactDialogDescription}</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="icon-button contact-modal__close"
+                aria-label={t.contactDialogCloseLabel}
+                onClick={() => setIsContactModalOpen(false)}
+              >
+                <Icon name="x" />
+              </button>
+            </div>
+
+            <div className="contact-modal__links">
+              <a
+                href={`mailto:${CONTACT_EMAIL}`}
+                className="toy-btn btn-wobble-group contact-modal__link contact-modal__link--email"
+              >
+                <span className="wobble-container" aria-hidden="true">
+                  <span className="wobble-target contact-modal__link-icon contact-modal__link-icon--email">
+                    <EmailGlyph />
+                  </span>
+                </span>
+                <span className="contact-modal__link-copy">
+                  <span className="contact-modal__link-title">{t.contactEmailTitle}</span>
+                  <span className="contact-modal__link-text">{CONTACT_EMAIL}</span>
+                </span>
+              </a>
+
+              <a
+                href={MARSHMALLOW_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="toy-btn btn-wobble-group contact-modal__link contact-modal__link--marshmallow"
+              >
+                <span className="wobble-container" aria-hidden="true">
+                  <span className="wobble-target contact-modal__link-icon contact-modal__link-icon--marshmallow">
+                    <img src="/marshmallow-logo.svg" alt="" className="contact-modal__marshmallow-logo" />
+                  </span>
+                </span>
+                <span className="contact-modal__link-copy">
+                  <span className="contact-modal__link-title">{t.contactMarshmallowTitle}</span>
+                  <span className="contact-modal__link-text">{t.contactMarshmallowText}</span>
+                </span>
+              </a>
+            </div>
+
+            <div className="contact-modal__meta" aria-label={`${t.versionLabel} v${APP_VERSION}`}>
+              <span className="contact-modal__meta-label">{t.versionLabel}</span>
+              <code className="contact-modal__meta-value">v{APP_VERSION}</code>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {uploadNotice ? (
+        <div className="upload-notice-popup solid-shadow" role="alert" aria-live="assertive">
+          <div className="upload-notice-popup__copy">
+            <strong>{uploadNotice.title}</strong>
+            <p>{uploadNotice.message}</p>
+          </div>
+          <button
+            type="button"
+            className="icon-button icon-button-quiet upload-notice-popup__close"
+            aria-label={t.uploadNoticeCloseLabel}
+            onClick={dismissUploadNotice}
+          >
+            <Icon name="x" />
+          </button>
+        </div>
+      ) : null}
+
       {isLocalPreview ? (
         <button
           type="button"
           className="view-toggle"
           aria-pressed={isMobilePreview}
-          onClick={() => setIsMobilePreview((current) => !current)}
+          onClick={() => {
+            closeExpandedPreview()
+            setIsMobilePreview((current) => !current)
+          }}
         >
           <span className="view-toggle__icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" strokeWidth="2.5">
@@ -913,31 +1760,365 @@ function hasMobilePreviewQuery() {
   return new URLSearchParams(window.location.search).get('view') === 'mobile'
 }
 
-function SettingRow(props: { label: string; children: React.ReactNode }) {
+function resolvePopoverUpward(element: HTMLElement | null) {
+  const rect = element?.getBoundingClientRect()
+
+  if (!rect) {
+    return false
+  }
+
+  const spaceBelow = window.innerHeight - rect.bottom
+  const spaceAbove = rect.top
+  return spaceBelow < 320 && spaceAbove > spaceBelow
+}
+
+function Field(props: { label: string; children: ReactNode }) {
   return (
-    <div className="setting-row">
-      <span className="setting-label">{props.label}</span>
-      <div className="setting-control">{props.children}</div>
+    <label className="field-card">
+      <span className="field-card__label">{props.label}</span>
+      <div className="field-card__control">{props.children}</div>
+    </label>
+  )
+}
+
+function CustomSelect(props: {
+  ariaLabel: string
+  value: string
+  groups: SelectGroup[]
+  onChange: (value: string) => void
+  className?: string
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [opensUpward, setOpensUpward] = useState(false)
+  const menuId = useId()
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
+
+  function getDisplayedGroups() {
+    return props.groups
+  }
+
+  function getDisplayedFlatOptions() {
+    return getDisplayedGroups().flatMap((group) => group.options)
+  }
+
+  const displayedGroups = getDisplayedGroups()
+  const displayedFlatOptions = displayedGroups.flatMap((group) => group.options)
+  const optionIndexByValue = new Map(displayedFlatOptions.map((option, index) => [option.value, index]))
+  const currentIndex = Math.max(
+    0,
+    displayedFlatOptions.findIndex((option) => option.value === props.value),
+  )
+  const currentOption = displayedFlatOptions[currentIndex] ?? displayedFlatOptions[0]
+
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      if (!isOpen || !rootRef.current || rootRef.current.contains(event.target as Node)) {
+        return
+      }
+
+      setIsOpen(false)
+    }
+
+    function handleDocumentKeydown(event: KeyboardEvent) {
+      if (!isOpen || event.key !== 'Escape') {
+        return
+      }
+
+      event.preventDefault()
+      setIsOpen(false)
+      window.requestAnimationFrame(() => buttonRef.current?.focus())
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleDocumentKeydown)
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleDocumentKeydown)
+    }
+  }, [isOpen])
+
+  function focusOption(index: number, optionCount = displayedFlatOptions.length) {
+    const nextIndex = (index + optionCount) % optionCount
+    optionRefs.current[nextIndex]?.focus()
+  }
+
+  function resolveOpensUpward() {
+    const rect = rootRef.current?.getBoundingClientRect()
+
+    if (!rect) {
+      return false
+    }
+
+    const spaceBelow = window.innerHeight - rect.bottom
+    const spaceAbove = rect.top
+    return spaceBelow < 280 && spaceAbove > spaceBelow
+  }
+
+  function openMenu(indexOffset = 0, focusTarget = true) {
+    const nextOpensUpward = resolveOpensUpward()
+    const nextDisplayedFlatOptions = getDisplayedFlatOptions()
+
+    if (nextDisplayedFlatOptions.length === 0) {
+      return
+    }
+
+    const nextCurrentIndex = Math.max(
+      0,
+      nextDisplayedFlatOptions.findIndex((option) => option.value === props.value),
+    )
+    const nextFocusIndex =
+      (nextCurrentIndex + indexOffset + nextDisplayedFlatOptions.length) %
+      nextDisplayedFlatOptions.length
+
+    setOpensUpward(nextOpensUpward)
+    setIsOpen(true)
+
+    window.requestAnimationFrame(() => {
+      if (focusTarget) {
+        focusOption(nextFocusIndex, nextDisplayedFlatOptions.length)
+        return
+      }
+
+      if (menuRef.current) {
+        menuRef.current.scrollTop = 0
+      }
+    })
+  }
+
+  function closeMenu(focusButton = true) {
+    setIsOpen(false)
+
+    if (focusButton) {
+      window.requestAnimationFrame(() => buttonRef.current?.focus())
+    }
+  }
+
+  function chooseValue(nextValue: string) {
+    if (nextValue !== props.value) {
+      props.onChange(nextValue)
+    }
+
+    closeMenu(false)
+    window.requestAnimationFrame(() => buttonRef.current?.focus())
+  }
+
+  function handleButtonKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      openMenu(0)
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      openMenu(-1)
+      return
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+
+      if (isOpen) {
+        closeMenu(false)
+      } else {
+        openMenu(0, true)
+      }
+    }
+  }
+
+  function handleOptionKeyDown(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      focusOption(index + 1)
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      focusOption(index - 1)
+      return
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault()
+      focusOption(0)
+      return
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault()
+      focusOption(displayedFlatOptions.length - 1)
+      return
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeMenu()
+      return
+    }
+
+    if (event.key === 'Tab') {
+      closeMenu(false)
+      return
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      chooseValue(displayedFlatOptions[index].value)
+    }
+  }
+
+  return (
+    <div
+      ref={rootRef}
+      className={`custom-select ${props.className ?? ''} ${isOpen ? 'is-open' : ''} ${
+        opensUpward ? 'is-open-upward' : ''
+      }`}
+    >
+      <button
+        ref={buttonRef}
+        type="button"
+        className="custom-select__button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={menuId}
+        aria-label={`${props.ariaLabel}: ${currentOption?.label ?? ''}`}
+        onClick={() => {
+          if (isOpen) {
+            closeMenu(false)
+          } else {
+            openMenu(0, false)
+          }
+        }}
+        onKeyDown={handleButtonKeyDown}
+      >
+        <span className="custom-select__label">{currentOption?.label}</span>
+        <span className="custom-select__icon field-chevron" aria-hidden="true">
+          <svg viewBox="0 0 24 24" strokeWidth="3">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </span>
+      </button>
+
+      <div
+        ref={menuRef}
+        id={menuId}
+        className="custom-select__menu"
+        role="listbox"
+        aria-label={props.ariaLabel}
+        hidden={!isOpen}
+      >
+        <div className="custom-select__options">
+          {displayedGroups.map((group, groupIndex) => (
+            <div className="custom-select__group" key={`${group.label ?? 'group'}-${groupIndex}`}>
+              {group.label ? <div className="custom-select__group-label">{group.label}</div> : null}
+              {group.options.map((option) => {
+                const index = optionIndexByValue.get(option.value) ?? 0
+
+                return (
+                  <button
+                    key={option.value}
+                    ref={(node) => {
+                      optionRefs.current[index] = node
+                    }}
+                    type="button"
+                    className="custom-select__option"
+                    role="option"
+                    aria-selected={option.value === props.value}
+                    onClick={() => chooseValue(option.value)}
+                    onKeyDown={(event) => handleOptionKeyDown(event, index)}
+                  >
+                    <span className="custom-select__option-label">{option.label}</span>
+                    {option.value === props.value ? (
+                      <span className="custom-select__check" aria-hidden="true">
+                        <Icon name="check" />
+                      </span>
+                    ) : null}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
 
-function AdjustmentControl(props: {
+function AccordionCard(props: {
+  title: string
+  iconName: string
+  isOpen: boolean
+  onToggle: () => void
+  rightContent?: string
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <section className={`accordion-card solid-shadow ${props.isOpen ? 'is-open' : ''} ${props.className ?? ''}`}>
+      <button
+        type="button"
+        className="accordion-card__trigger"
+        aria-expanded={props.isOpen}
+        onClick={props.onToggle}
+      >
+        <span className="accordion-card__title">
+          <Icon name={props.iconName} className="accordion-card__lead-icon" />
+          <span>{props.title}</span>
+        </span>
+        <span className="accordion-card__meta">
+          {!props.isOpen && props.rightContent ? (
+            <span className="accordion-card__summary">{props.rightContent}</span>
+          ) : null}
+          <span className={`accordion-card__chevron ${props.isOpen ? 'is-open' : ''}`} aria-hidden="true">
+            <Icon name="chevron-down" />
+          </span>
+        </span>
+      </button>
+
+      {props.isOpen ? <div className="accordion-card__body">{props.children}</div> : null}
+    </section>
+  )
+}
+
+function CompactSlider(props: {
+  label: string
   value: number
   min: number
   max: number
   onChange: (value: string) => void
 }) {
+  const percent = ((props.value - props.min) / Math.max(props.max - props.min, 1)) * 100
+
   return (
-    <div className="adjustment-control">
-      <input
-        type="range"
-        min={props.min}
-        max={props.max}
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-      />
-      <span className="adjustment-value">{formatSignedValue(props.value)}</span>
+    <div className="compact-slider">
+      <label className="compact-slider__label">{props.label}</label>
+      <div className="compact-slider__control">
+        <input
+          className="compact-slider__range"
+          type="range"
+          min={props.min}
+          max={props.max}
+          value={props.value}
+          style={{ ['--slider-percent' as string]: `${percent}%` }}
+          onChange={(event) => props.onChange(event.target.value)}
+        />
+        <input
+          className="compact-slider__number"
+          type="number"
+          min={props.min}
+          max={props.max}
+          value={props.value}
+          onChange={(event) => props.onChange(event.target.value)}
+        />
+      </div>
     </div>
   )
 }
@@ -947,6 +2128,7 @@ function HexColorField(props: {
   ariaLabel: string
   onCommit: (value: string) => void
   placeholder?: string
+  className?: string
 }) {
   const [draft, setDraft] = useState(props.value)
 
@@ -964,6 +2146,7 @@ function HexColorField(props: {
 
   return (
     <input
+      className={props.className}
       type="text"
       value={draft}
       aria-label={props.ariaLabel}
@@ -983,7 +2166,286 @@ function HexColorField(props: {
   )
 }
 
-function Icon(props: { name: string }) {
+function PaletteColorPickerButton(props: {
+  value: string
+  ariaLabel: string
+  onCommit: (value: string) => void
+}) {
+  const pickerRef = useRef<HTMLDivElement | null>(null)
+  const normalizedValue = normalizeHexColor(props.value)
+  const safeValue = normalizedValue ?? DEFAULT_PICKER_BACKGROUND
+  const [pickerColor, setPickerColor] = useState<HsvColor>(() => hexToHsv(safeValue))
+  const [isOpen, setIsOpen] = useState(false)
+  const [isOpenUpward, setIsOpenUpward] = useState(false)
+  const hueSliderStyle = { '--mini-color-thumb': safeValue } as CSSProperties
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    setIsOpenUpward(resolvePopoverUpward(pickerRef.current))
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsOpen(false)
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isOpen])
+
+  function commitColor(nextColor: HsvColor) {
+    setPickerColor(nextColor)
+    props.onCommit(hsvToHex(nextColor))
+  }
+
+  function togglePicker() {
+    const nextOpen = !isOpen
+
+    if (nextOpen) {
+      setIsOpenUpward(resolvePopoverUpward(pickerRef.current))
+    }
+
+    setIsOpen(nextOpen)
+  }
+
+  function openPicker() {
+    setIsOpenUpward(resolvePopoverUpward(pickerRef.current))
+    setIsOpen(true)
+  }
+
+  function syncInput(nextValue: string) {
+    const normalized = normalizeHexColor(nextValue)
+
+    if (!normalized) {
+      return
+    }
+
+    props.onCommit(normalized)
+    setPickerColor((current) => syncPickerColorWithHex(current, normalized))
+  }
+
+  function updateColorFromPlane(element: HTMLDivElement, clientX: number, clientY: number) {
+    const bounds = element.getBoundingClientRect()
+    const saturation = clamp((clientX - bounds.left) / bounds.width, 0, 1)
+    const value = 1 - clamp((clientY - bounds.top) / bounds.height, 0, 1)
+
+    commitColor({
+      h: pickerColor.h,
+      s: saturation,
+      v: value,
+    })
+  }
+
+  function handlePlanePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault()
+
+    const element = event.currentTarget
+    const pointerId = event.pointerId
+
+    updateColorFromPlane(element, event.clientX, event.clientY)
+
+    try {
+      element.setPointerCapture(pointerId)
+    } catch {
+      // Pointer capture isn't available in every browser.
+    }
+
+    function cleanup() {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+
+      try {
+        element.releasePointerCapture(pointerId)
+      } catch {
+        // Ignore release failures for unsupported browsers.
+      }
+    }
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      updateColorFromPlane(element, moveEvent.clientX, moveEvent.clientY)
+    }
+
+    function handlePointerUp(moveEvent: PointerEvent) {
+      if (moveEvent.pointerId !== pointerId) {
+        return
+      }
+
+      cleanup()
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+  }
+
+  function handleHueChange(event: ChangeEvent<HTMLInputElement>) {
+    commitColor({
+      h: Number(event.target.value),
+      s: pickerColor.s,
+      v: pickerColor.v,
+    })
+  }
+
+  return (
+    <div
+      className="palette-color-picker"
+      ref={pickerRef}
+      onPointerDown={(event) => {
+        event.stopPropagation()
+      }}
+    >
+      <div
+        className={`mini-color-row mini-color-row--compact palette-color-picker__row ${
+          isOpen ? 'is-open' : ''
+        }`}
+        onPointerDown={(event) => {
+          event.preventDefault()
+          openPicker()
+        }}
+      >
+        <button
+          type="button"
+          className={`palette-color-picker__trigger mini-color-swatch-button ${isOpen ? 'is-open' : ''}`}
+          style={{ backgroundColor: safeValue }}
+          aria-label={`${props.ariaLabel}: ${safeValue}`}
+          aria-expanded={isOpen}
+          aria-haspopup="dialog"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            togglePicker()
+          }}
+        >
+          <span className="visually-hidden">{props.value}</span>
+        </button>
+
+        <input
+          className="mini-input--hex mini-color-row__display"
+          type="text"
+          value={safeValue}
+          readOnly
+          aria-label={`${props.ariaLabel}: ${safeValue}`}
+          aria-expanded={isOpen}
+          aria-haspopup="dialog"
+          spellCheck={false}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            openPicker()
+          }}
+          onFocus={() => openPicker()}
+        />
+
+        <button
+          type="button"
+          className="mini-color-row__toggle"
+          aria-label={props.ariaLabel}
+          aria-expanded={isOpen}
+          aria-haspopup="dialog"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            togglePicker()
+          }}
+        >
+          <span className="field-chevron" aria-hidden="true">
+            <svg viewBox="0 0 24 24" strokeWidth="3">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </span>
+        </button>
+      </div>
+
+      {isOpen ? (
+        <div
+          className={`mini-color-popover mini-color-popover--refresh ${
+            isOpenUpward ? 'is-open-upward' : ''
+          }`}
+          role="dialog"
+          aria-label={props.ariaLabel}
+          onPointerDown={(event) => {
+            event.stopPropagation()
+          }}
+        >
+          <div className="mini-color-popover__preview">
+            <span
+              className="mini-color-popover__preview-swatch"
+              style={{ backgroundColor: safeValue }}
+              aria-hidden="true"
+            />
+            <HexColorField
+              key={props.value}
+              className="mini-input mini-input--hex mini-color-popover__hex"
+              value={safeValue}
+              ariaLabel={props.ariaLabel}
+              placeholder="#FFFFFF"
+              onCommit={syncInput}
+            />
+          </div>
+
+          <div
+            className="mini-color-plane"
+            style={{ backgroundColor: hsvToHex({ h: pickerColor.h, s: 1, v: 1 }) }}
+            onPointerDown={handlePlanePointerDown}
+          >
+            <span
+              className="mini-color-plane__pointer"
+              style={{
+                left: `${pickerColor.s * 100}%`,
+                top: `${(1 - pickerColor.v) * 100}%`,
+              }}
+            />
+          </div>
+
+          <div className="mini-color-hue-wrap">
+            <input
+              className="mini-color-hue"
+              type="range"
+              min={0}
+              max={360}
+              step={1}
+              value={Math.round(pickerColor.h)}
+              style={hueSliderStyle}
+              onChange={handleHueChange}
+              aria-label={props.ariaLabel}
+            />
+          </div>
+
+          <div className="mini-color-popover__swatches">
+            {BACKGROUND_COLOR_SWATCHES.map((color) => (
+              <button
+                key={color}
+                type="button"
+                className={`mini-color-option ${safeValue === color ? 'is-selected' : ''}`}
+                style={{ backgroundColor: color }}
+                aria-label={`${props.ariaLabel}: ${color.toUpperCase()}`}
+                title={color.toUpperCase()}
+                onClick={() => syncInput(color)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function Icon(props: { name: string; className?: string }) {
   const icons: Record<string, React.ReactNode> = {
     'arrow-right': <path d="M5 12h14M13 5l7 7-7 7" />,
     download: (
@@ -1012,6 +2474,22 @@ function Icon(props: { name: string }) {
       <path d="M12 22a10 10 0 1 1 9.7-12.5c.3 1.2-.5 2.5-1.8 2.5H17a2 2 0 0 0-2 2c0 .6.3 1.1.7 1.5.6.5.8 1.4.5 2.2A3.5 3.5 0 0 1 12 22Z" />
     ),
     plus: <path d="M12 5v14M5 12h14" />,
+    check: <path d="m5 13 4 4L19 7" />,
+    'chevron-down': <path d="m6 9 6 6 6-6" />,
+    eye: (
+      <>
+        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
+        <circle cx="12" cy="12" r="3" />
+      </>
+    ),
+    maximize: (
+      <>
+        <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+        <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+        <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+        <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+      </>
+    ),
     save: (
       <>
         <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
@@ -1056,7 +2534,7 @@ function Icon(props: { name: string }) {
 
   return (
     <svg
-      className="icon"
+      className={props.className ? `icon ${props.className}` : 'icon'}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -1066,6 +2544,27 @@ function Icon(props: { name: string }) {
       aria-hidden="true"
     >
       {icons[props.name]}
+    </svg>
+  )
+}
+
+function ContactGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor">
+      <path
+        fillRule="evenodd"
+        d="M12 2.25c-2.429 0-4.817.178-7.152.521C2.87 3.061 1.5 4.795 1.5 6.741v6.018c0 1.946 1.37 3.68 3.348 3.97.877.129 1.761.234 2.652.316V21a.75.75 0 0 0 1.28.53l4.184-4.183a.39.39 0 0 1 .266-.112c2.006-.05 3.982-.22 5.922-.506 1.978-.29 3.348-2.023 3.348-3.97V6.741c0-1.947-1.37-3.68-3.348-3.97A49.145 49.145 0 0 0 12 2.25ZM8.25 8.625a1.125 1.125 0 1 0 0 2.25 1.125 1.125 0 0 0 0-2.25Zm2.625 1.125a1.125 1.125 0 1 1 2.25 0 1.125 1.125 0 0 1-2.25 0Zm4.875-1.125a1.125 1.125 0 1 0 0 2.25 1.125 1.125 0 0 0 0-2.25Z"
+        clipRule="evenodd"
+      />
+    </svg>
+  )
+}
+
+function EmailGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor">
+      <path d="M1.5 8.67v8.58a3 3 0 0 0 3 3h15a3 3 0 0 0 3-3V8.67l-8.928 5.493a3 3 0 0 1-3.144 0L1.5 8.67z" />
+      <path d="M22.5 6.908V6.75a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3v.158l9.714 5.978a1.5 1.5 0 0 0 1.572 0L22.5 6.908z" />
     </svg>
   )
 }
@@ -1133,6 +2632,131 @@ function loadImage(objectUrl: string): Promise<HTMLImageElement> {
   })
 }
 
+function isSupportedImageMime(type: string): boolean {
+  return type in SUPPORTED_IMAGE_TYPE_MAP
+}
+
+function isImageFile(file: File): boolean {
+  const lowerName = file.name.toLowerCase()
+
+  return (
+    (file.type.length > 0 && isSupportedImageMime(file.type)) ||
+    SUPPORTED_IMAGE_EXTENSIONS.some((extension) => lowerName.endsWith(extension))
+  )
+}
+
+function hexToRgb(value: string) {
+  const normalized = normalizeHexColor(value)
+
+  if (!normalized) {
+    return null
+  }
+
+  return {
+    r: Number.parseInt(normalized.slice(1, 3), 16),
+    g: Number.parseInt(normalized.slice(3, 5), 16),
+    b: Number.parseInt(normalized.slice(5, 7), 16),
+  }
+}
+
+function normalizeHue(value: number) {
+  const hue = value % 360
+  return hue < 0 ? hue + 360 : hue
+}
+
+function hexToHsv(value: string): HsvColor {
+  const rgb = hexToRgb(value)
+  if (!rgb) {
+    return { h: 0, s: 0, v: 0 }
+  }
+
+  const red = rgb.r / 255
+  const green = rgb.g / 255
+  const blue = rgb.b / 255
+  const max = Math.max(red, green, blue)
+  const min = Math.min(red, green, blue)
+  const delta = max - min
+
+  let hue = 0
+  if (delta !== 0) {
+    if (max === red) {
+      hue = ((green - blue) / delta) % 6
+    } else if (max === green) {
+      hue = (blue - red) / delta + 2
+    } else {
+      hue = (red - green) / delta + 4
+    }
+  }
+
+  return {
+    h: normalizeHue(hue * 60),
+    s: max === 0 ? 0 : delta / max,
+    v: max,
+  }
+}
+
+function hsvToRgb(value: HsvColor) {
+  const hue = normalizeHue(value.h)
+  const saturation = clamp(value.s, 0, 1)
+  const brightness = clamp(value.v, 0, 1)
+  const chroma = brightness * saturation
+  const segment = hue / 60
+  const secondary = chroma * (1 - Math.abs((segment % 2) - 1))
+
+  let red = 0
+  let green = 0
+  let blue = 0
+
+  if (segment >= 0 && segment < 1) {
+    red = chroma
+    green = secondary
+  } else if (segment < 2) {
+    red = secondary
+    green = chroma
+  } else if (segment < 3) {
+    green = chroma
+    blue = secondary
+  } else if (segment < 4) {
+    green = secondary
+    blue = chroma
+  } else if (segment < 5) {
+    red = secondary
+    blue = chroma
+  } else {
+    red = chroma
+    blue = secondary
+  }
+
+  const match = brightness - chroma
+
+  return {
+    r: Math.round((red + match) * 255),
+    g: Math.round((green + match) * 255),
+    b: Math.round((blue + match) * 255),
+  }
+}
+
+function hsvToHex(value: HsvColor) {
+  const rgb = hsvToRgb(value)
+  return `#${[rgb.r, rgb.g, rgb.b]
+    .map((channel) => channel.toString(16).padStart(2, '0'))
+    .join('')}`.toUpperCase()
+}
+
+function syncPickerColorWithHex(current: HsvColor, value: string): HsvColor {
+  const next = hexToHsv(value)
+
+  if (next.s === 0 || next.v === 0) {
+    return {
+      h: current.h,
+      s: next.s,
+      v: next.v,
+    }
+  }
+
+  return next
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
@@ -1141,15 +2765,13 @@ function fitWithinBox(
   width: number,
   height: number,
   maxSide: number,
+  allowUpscale = false,
 ): { width: number; height: number } {
-  const scale = Math.min(maxSide / Math.max(width, 1), maxSide / Math.max(height, 1), 1)
+  const scale = Math.min(maxSide / Math.max(width, 1), maxSide / Math.max(height, 1))
+  const safeScale = allowUpscale ? scale : Math.min(scale, 1)
 
   return {
-    width: Math.max(1, Math.round(width * scale)),
-    height: Math.max(1, Math.round(height * scale)),
+    width: Math.max(1, Math.round(width * safeScale)),
+    height: Math.max(1, Math.round(height * safeScale)),
   }
-}
-
-function formatSignedValue(value: number): string {
-  return value > 0 ? `+${value}` : `${value}`
 }

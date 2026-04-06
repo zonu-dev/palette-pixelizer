@@ -24,13 +24,13 @@
   --button-shadow: var(--line);
   --amber: #fbbf24;
   --marshmallow-pink: #ff80a1;
-  --theme-accent: #fb7185;
-  --theme-accent-deep: #e11d48;
-  --theme-soft: #fff1f4;
-  --theme-soft-border: #fecdd3;
-  --theme-ink: #be123c;
-  --focus: rgba(225, 29, 72, 0.18);
-  --danger: #be185d;
+  --theme-accent: #8b5cf6;
+  --theme-accent-deep: #7c3aed;
+  --theme-soft: #f5f3ff;
+  --theme-soft-border: #ddd6fe;
+  --theme-ink: #6d28d9;
+  --focus: rgba(139, 92, 246, 0.18);
+  --danger: #dc2626;
   --checkerboard: #f8fafc;
   --checkerboard-line: rgba(148, 163, 184, 0.16);
 }
@@ -71,7 +71,7 @@ body::before {
 }
 
 ::selection {
-  background: rgba(251, 113, 133, 0.18);
+  background: rgba(139, 92, 246, 0.18);
 }
 
 button,

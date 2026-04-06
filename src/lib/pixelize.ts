@@ -198,9 +198,13 @@ function createAdjustedSourceCanvas(
   canvas.height = height
 
   context.clearRect(0, 0, width, height)
-  context.filter = buildAdjustmentFilter(adjustments)
   context.drawImage(image, 0, 0, width, height)
-  context.filter = 'none'
+
+  if (hasAdjustmentEffects(adjustments)) {
+    const imageData = context.getImageData(0, 0, width, height)
+    applyAdjustmentsToImageData(imageData.data, adjustments)
+    context.putImageData(imageData, 0, 0)
+  }
 
   return canvas
 }
@@ -262,14 +266,6 @@ function drawSourceIntoCanvas(options: {
   context.drawImage(source, offsetX, offsetY, drawWidth, drawHeight)
 }
 
-function buildAdjustmentFilter(adjustments: AdjustmentSettings): string {
-  const hue = adjustments.hue
-  const saturation = clampPercentage(100 + adjustments.saturation)
-  const brightness = clampPercentage(100 + adjustments.brightness)
-
-  return `hue-rotate(${hue}deg) saturate(${saturation}%) brightness(${brightness}%)`
-}
-
 function sanitizeSegment(value: string): string {
   const normalized = value
     .normalize('NFKC')
@@ -287,4 +283,125 @@ function sanitizeSegment(value: string): string {
 
 function clampPercentage(value: number): number {
   return Math.min(Math.max(value, 0), 200)
+}
+
+function hasAdjustmentEffects(adjustments: AdjustmentSettings): boolean {
+  return adjustments.hue !== 0 || adjustments.saturation !== 0 || adjustments.brightness !== 0
+}
+
+function applyAdjustmentsToImageData(
+  data: Uint8ClampedArray,
+  adjustments: AdjustmentSettings,
+): void {
+  const hueOffset = adjustments.hue / 360
+  const saturationFactor = clampPercentage(100 + adjustments.saturation) / 100
+  const brightnessFactor = clampPercentage(100 + adjustments.brightness) / 100
+
+  for (let index = 0; index < data.length; index += 4) {
+    const alpha = data[index + 3]
+
+    if (alpha === 0) {
+      continue
+    }
+
+    const [h, s, l] = rgbToHsl(data[index], data[index + 1], data[index + 2])
+    const nextHue = wrapUnit(h + hueOffset)
+    const nextSaturation = clamp(s * saturationFactor, 0, 1)
+    const [red, green, blue] = hslToRgb(nextHue, nextSaturation, l)
+
+    data[index] = clampChannel(red * brightnessFactor)
+    data[index + 1] = clampChannel(green * brightnessFactor)
+    data[index + 2] = clampChannel(blue * brightnessFactor)
+  }
+}
+
+function rgbToHsl(red: number, green: number, blue: number): [number, number, number] {
+  const r = red / 255
+  const g = green / 255
+  const b = blue / 255
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const lightness = (max + min) / 2
+  const delta = max - min
+
+  if (delta === 0) {
+    return [0, 0, lightness]
+  }
+
+  const saturation =
+    lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min)
+
+  let hue = 0
+
+  switch (max) {
+    case r:
+      hue = (g - b) / delta + (g < b ? 6 : 0)
+      break
+    case g:
+      hue = (b - r) / delta + 2
+      break
+    default:
+      hue = (r - g) / delta + 4
+      break
+  }
+
+  return [hue / 6, saturation, lightness]
+}
+
+function hslToRgb(hue: number, saturation: number, lightness: number): RgbColor {
+  if (saturation === 0) {
+    const channel = Math.round(lightness * 255)
+    return [channel, channel, channel]
+  }
+
+  const q =
+    lightness < 0.5
+      ? lightness * (1 + saturation)
+      : lightness + saturation - lightness * saturation
+  const p = 2 * lightness - q
+
+  return [
+    Math.round(hueToChannel(p, q, hue + 1 / 3) * 255),
+    Math.round(hueToChannel(p, q, hue) * 255),
+    Math.round(hueToChannel(p, q, hue - 1 / 3) * 255),
+  ]
+}
+
+function hueToChannel(p: number, q: number, hue: number): number {
+  let wrappedHue = hue
+
+  if (wrappedHue < 0) {
+    wrappedHue += 1
+  }
+
+  if (wrappedHue > 1) {
+    wrappedHue -= 1
+  }
+
+  if (wrappedHue < 1 / 6) {
+    return p + (q - p) * 6 * wrappedHue
+  }
+
+  if (wrappedHue < 1 / 2) {
+    return q
+  }
+
+  if (wrappedHue < 2 / 3) {
+    return p + (q - p) * (2 / 3 - wrappedHue) * 6
+  }
+
+  return p
+}
+
+function wrapUnit(value: number): number {
+  const wrapped = value % 1
+  return wrapped < 0 ? wrapped + 1 : wrapped
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
+function clampChannel(value: number): number {
+  return Math.round(clamp(value, 0, 255))
 }
