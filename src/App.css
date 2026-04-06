@@ -1638,9 +1638,8 @@ input[type='color']:focus,
   display: grid;
   justify-items: center;
   align-content: center;
-  min-height: 144px;
   gap: 8px;
-  padding: 16px;
+  padding: 18px;
   border-color: #cbd5e1;
   border-radius: 1.6rem;
   background: #ffffff;
@@ -3660,7 +3659,7 @@ input[type='color']:focus,
 }
 
 .app.is-compact-layout .dropzone--refresh {
-  min-height: 132px;
+  padding: 18px 16px;
 }
 
 .app.is-compact-layout .dropzone-icon--refresh {
