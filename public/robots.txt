@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://zonu-dev.github.io/palette-pixelizer/sitemap.xml
+Sitemap: https://zoochigames.com/apps/palette-pixelizer/sitemap.xml
