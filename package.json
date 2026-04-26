@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "build:pages": "tsc -b && vite build --base=/palette-pixelizer/",
     "build:app-pages": "tsc -b && vite build --base=/apps/palette-pixelizer/",
+    "release:patch": "npm version patch --no-git-tag-version",
+    "check:version-bump": "node scripts/check-version-bump.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run"
