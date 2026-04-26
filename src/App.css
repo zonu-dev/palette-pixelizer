@@ -691,11 +691,11 @@
   height: 64px;
   border-radius: 1rem;
   background:
-    linear-gradient(45deg, #f1f5f9 25%, transparent 25%, transparent 75%, #f1f5f9 75%, #f1f5f9),
-    linear-gradient(45deg, #f1f5f9 25%, transparent 25%, transparent 75%, #f1f5f9 75%, #f1f5f9);
+    linear-gradient(45deg, var(--checkerboard) 25%, transparent 25%, transparent 75%, var(--checkerboard) 75%, var(--checkerboard)),
+    linear-gradient(45deg, var(--checkerboard) 25%, transparent 25%, transparent 75%, var(--checkerboard) 75%, var(--checkerboard));
   background-position: 0 0, 8px 8px;
   background-size: 16px 16px;
-  background-color: #fff;
+  background-color: var(--checkerboard-line);
   object-fit: cover;
   flex: none;
 }
@@ -890,11 +890,11 @@ input[type='color']:focus,
   border: 3px solid var(--line);
   border-radius: 1.1rem;
   background:
-    linear-gradient(45deg, #f1f5f9 25%, transparent 25%, transparent 75%, #f1f5f9 75%, #f1f5f9),
-    linear-gradient(45deg, #f1f5f9 25%, transparent 25%, transparent 75%, #f1f5f9 75%, #f1f5f9);
+    linear-gradient(45deg, var(--checkerboard) 25%, transparent 25%, transparent 75%, var(--checkerboard) 75%, var(--checkerboard)),
+    linear-gradient(45deg, var(--checkerboard) 25%, transparent 25%, transparent 75%, var(--checkerboard) 75%, var(--checkerboard));
   background-position: 0 0, 10px 10px;
   background-size: 20px 20px;
-  background-color: #fff;
+  background-color: var(--checkerboard-line);
 }
 
 .adjustment-preview-canvas {
@@ -1086,7 +1086,7 @@ input[type='color']:focus,
     );
   background-position: 0 0, 10px 10px;
   background-size: 20px 20px;
-  background-color: #fff;
+  background-color: var(--checkerboard-line);
 }
 
 .preview-canvas {
@@ -2000,11 +2000,11 @@ input[type='color']:focus,
   border: 2px solid #e2e8f0;
   border-radius: 1.1rem;
   background:
-    linear-gradient(45deg, #f8fafc 25%, transparent 25%, transparent 75%, #f8fafc 75%, #f8fafc),
-    linear-gradient(45deg, #f8fafc 25%, transparent 25%, transparent 75%, #f8fafc 75%, #f8fafc);
+    linear-gradient(45deg, var(--checkerboard) 25%, transparent 25%, transparent 75%, var(--checkerboard) 75%, var(--checkerboard)),
+    linear-gradient(45deg, var(--checkerboard) 25%, transparent 25%, transparent 75%, var(--checkerboard) 75%, var(--checkerboard));
   background-position: 0 0, 8px 8px;
   background-size: 16px 16px;
-  background-color: #ffffff;
+  background-color: var(--checkerboard-line);
 }
 
 .mini-preview__canvas {
@@ -2548,11 +2548,11 @@ input[type='color']:focus,
 .mini-color-swatch-button.is-transparent,
 .mini-color-popover__preview-swatch.is-transparent {
   background:
-    linear-gradient(45deg, #f8fafc 25%, transparent 25%, transparent 75%, #f8fafc 75%, #f8fafc),
-    linear-gradient(45deg, #f8fafc 25%, transparent 25%, transparent 75%, #f8fafc 75%, #f8fafc);
+    linear-gradient(45deg, var(--checkerboard) 25%, transparent 25%, transparent 75%, var(--checkerboard) 75%, var(--checkerboard)),
+    linear-gradient(45deg, var(--checkerboard) 25%, transparent 25%, transparent 75%, var(--checkerboard) 75%, var(--checkerboard));
   background-position: 0 0, 8px 8px;
   background-size: 16px 16px;
-  background-color: #ffffff;
+  background-color: var(--checkerboard-line);
 }
 
 .mini-color-row__display {
@@ -3112,7 +3112,7 @@ input[type='color']:focus,
     linear-gradient(45deg, var(--checkerboard) 25%, transparent 25%, transparent 75%, var(--checkerboard) 75%, var(--checkerboard));
   background-position: 0 0, 10px 10px;
   background-size: 20px 20px;
-  background-color: #ffffff;
+  background-color: var(--checkerboard-line);
   border: 0;
   border-radius: 0;
   overflow: hidden;
